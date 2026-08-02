@@ -17,6 +17,20 @@
         <br />
     </div>
 
+## Meshery MCP Server extension
+
+The Meshery MCP Server extension provides a dedicated Model Context Protocol (MCP) server that streamlines and accelerates the creation and management of Meshery designs. As an official Meshery Extension, it is owned end-to-end by its maintainers—covering architecture and design, implementation, tests, documentation, and publication to both the MCP and Skills marketplaces.
+
+The initial scope for the MCP Server, in priority order, includes:
+
+1. Creation of Meshery designs.
+2. Retrieval of designs in the user's requested file format (for example, JSON or YAML representations of designs).
+3. Snapshotting of Meshery designs.
+4. Design deployment dry-run results.
+5. Definition, invocation, and results of performance tests.
+
+Contributors who are capable of and available to carry this work through independently—from 0% to 100%—may become the project's official maintainer(s).
+
 Meshery's [high project velocity](https://meshery.io/blog/sixth-highest-velocity-cncf-project) necessitates a revision in its governance and organizational structure to align with the scale of its growing complexity and community contributions. To best serve its expansive ecosystem, Meshery maintainers have opted to partition its numerous GitHub repositories into two distinct organizations: [github.com/meshery](https://github.com/meshery) for the core platform and [meshery-extensions](https://github.com/meshery-extensions) for [extensions](https://meshery.io/extensions) and [integrations](https://meshery.io/integrations).
 
 [Meshery Extensions](https://meshery.io/extension) are plugins or add-ons that enhance the functionality of the Meshery platform beyond its core capabilities. Meshery supports different [types of extensions](https://docs.meshery.io/extensions/)):
