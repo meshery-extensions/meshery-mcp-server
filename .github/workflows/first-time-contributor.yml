@@ -9,7 +9,6 @@ jobs:
   welcome:
     runs-on: ubuntu-24.04  # Specify the environment for the job
     if: ${{ 
-      github.repository == 'meshery/meshery' &&
       github.event.action == 'opened' &&
       github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR' &&
       github.event.pull_request.author_association != 'COLLABORATOR' &&
