@@ -55,8 +55,8 @@ dist/**
 
 # IDE
 **/.idea
-.vscode/** */
-.cusorignore
+.vscode/**
+.cursorignore
 *.config
 
 # Meshery
