@@ -60,14 +60,17 @@ type Version struct {
 
 // Connection represents a connection object returned by the Meshery REST API.
 type Connection struct {
-	ID        string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Kind      string         `json:"kind,omitempty"`
-	Type      string         `json:"type,omitempty"`
-	Status    string         `json:"status,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	CreatedAt time.Time      `json:"createdAt,omitempty"`
-	UpdatedAt time.Time      `json:"updatedAt,omitempty"`
+	ID           string         `json:"id,omitempty"`
+	Name         string         `json:"name,omitempty"`
+	Kind         string         `json:"kind,omitempty"`
+	Type         string         `json:"type,omitempty"`
+	SubType      string         `json:"subType,omitempty"`
+	Status       string         `json:"status,omitempty"`
+	CredentialID string         `json:"credentialId,omitempty"`
+	UserID       string         `json:"userId,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	CreatedAt    time.Time      `json:"createdAt,omitempty"`
+	UpdatedAt    time.Time      `json:"updatedAt,omitempty"`
 }
 
 // ConnectionResponse represents the envelope response for connections list endpoint.
@@ -83,6 +86,9 @@ type Pattern struct {
 	ID          string         `json:"id,omitempty"`
 	Name        string         `json:"name,omitempty"`
 	PatternFile string         `json:"patternFile,omitempty"`
+	CatalogData map[string]any `json:"catalogData,omitempty"`
+	UserID      string         `json:"userId,omitempty"`
+	Visibility  string         `json:"visibility,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 	CreatedAt   time.Time      `json:"createdAt,omitempty"`
 	UpdatedAt   time.Time      `json:"updatedAt,omitempty"`
@@ -98,12 +104,14 @@ type PatternResponse struct {
 
 // Workspace represents a workspace object returned by the Meshery REST API.
 type Workspace struct {
-	ID          string         `json:"id,omitempty"`
-	Name        string         `json:"name,omitempty"`
-	Description string         `json:"description,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	CreatedAt   time.Time      `json:"createdAt,omitempty"`
-	UpdatedAt   time.Time      `json:"updatedAt,omitempty"`
+	ID             string         `json:"id,omitempty"`
+	Name           string         `json:"name,omitempty"`
+	Description    string         `json:"description,omitempty"`
+	OrganizationID string         `json:"organizationId,omitempty"`
+	OwnerID        string         `json:"ownerId,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	CreatedAt      time.Time      `json:"createdAt,omitempty"`
+	UpdatedAt      time.Time      `json:"updatedAt,omitempty"`
 }
 
 // WorkspaceResponse represents the envelope response for workspaces list endpoint.
@@ -116,12 +124,14 @@ type WorkspaceResponse struct {
 
 // Environment represents an environment object returned by the Meshery REST API.
 type Environment struct {
-	ID          string         `json:"id,omitempty"`
-	Name        string         `json:"name,omitempty"`
-	Description string         `json:"description,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	CreatedAt   time.Time      `json:"createdAt,omitempty"`
-	UpdatedAt   time.Time      `json:"updatedAt,omitempty"`
+	ID             string         `json:"id,omitempty"`
+	Name           string         `json:"name,omitempty"`
+	Description    string         `json:"description,omitempty"`
+	OrganizationID string         `json:"organizationId,omitempty"`
+	OwnerID        string         `json:"ownerId,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	CreatedAt      time.Time      `json:"createdAt,omitempty"`
+	UpdatedAt      time.Time      `json:"updatedAt,omitempty"`
 }
 
 // EnvironmentResponse represents the envelope response for environments list endpoint.
@@ -137,7 +147,9 @@ type Model struct {
 	ID          string         `json:"id,omitempty"`
 	Name        string         `json:"name,omitempty"`
 	Version     string         `json:"version,omitempty"`
-	DisplayName string         `json:"displayName,omitempty"`
+	DisplayName string         `json:"display_name,omitempty"`
+	Category    string         `json:"category,omitempty"`
+	SubCategory string         `json:"subCategory,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
@@ -156,6 +168,8 @@ type PerformanceProfile struct {
 	ServiceMesh        string         `json:"serviceMesh,omitempty"`
 	ConcurrentRequests int            `json:"concurrentRequests,omitempty"`
 	Duration           string         `json:"duration,omitempty"`
+	QPS                int            `json:"qps,omitempty"`
+	LoadGenerator      string         `json:"loadGenerator,omitempty"`
 	Metadata           map[string]any `json:"metadata,omitempty"`
 	CreatedAt          time.Time      `json:"createdAt,omitempty"`
 	UpdatedAt          time.Time      `json:"updatedAt,omitempty"`
