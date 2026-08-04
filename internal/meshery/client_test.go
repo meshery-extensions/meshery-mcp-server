@@ -418,6 +418,48 @@ func TestClient_Handles204NoContent(t *testing.T) {
 	}
 }
 
+func TestConnection_SchemaWireFormatUnmarshaling(t *testing.T) {
+	t.Parallel()
+
+	rawJSON := `{
+		"id": "conn-123",
+		"name": "minikube",
+		"kind": "kubernetes",
+		"type": "cluster",
+		"subType": "k8s",
+		"status": "connected",
+		"credentialId": "cred-abc-456",
+		"user_id": "user-789",
+		"created_at": "2026-08-04T12:00:00Z",
+		"updated_at": "2026-08-04T12:30:00Z"
+	}`
+
+	var conn Connection
+	err := json.Unmarshal([]byte(rawJSON), &conn)
+	if err != nil {
+		t.Fatalf("failed to unmarshal raw connection JSON: %v", err)
+	}
+
+	if conn.ID != "conn-123" {
+		t.Errorf("expected ID 'conn-123', got %q", conn.ID)
+	}
+	if conn.CredentialID != "cred-abc-456" {
+		t.Errorf("expected CredentialID 'cred-abc-456' from credentialId, got %q", conn.CredentialID)
+	}
+	if conn.SubType != "k8s" {
+		t.Errorf("expected SubType 'k8s' from subType, got %q", conn.SubType)
+	}
+	if conn.UserID != "user-789" {
+		t.Errorf("expected UserID 'user-789' from user_id, got %q", conn.UserID)
+	}
+	if conn.CreatedAt.IsZero() {
+		t.Error("expected CreatedAt to be parsed from created_at, got zero time")
+	}
+	if conn.UpdatedAt.IsZero() {
+		t.Error("expected UpdatedAt to be parsed from updated_at, got zero time")
+	}
+}
+
 func TestListConnections_EncodesQueryParametersAndEscapesSpaces(t *testing.T) {
 	t.Parallel()
 
@@ -425,12 +467,21 @@ func TestListConnections_EncodesQueryParametersAndEscapesSpaces(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(ConnectionResponse{
-			Page:        1,
-			PageSize:    10,
-			TotalCount:  1,
-			Connections: []Connection{{ID: "conn-1", Name: "k8s cluster"}},
-		})
+		_, _ = w.Write([]byte(`{
+			"page": 1,
+			"pageSize": 10,
+			"totalCount": 1,
+			"connections": [
+				{
+					"id": "conn-1",
+					"name": "k8s cluster",
+					"credentialId": "cred-1",
+					"subType": "k8s",
+					"user_id": "user-1",
+					"created_at": "2026-08-04T10:00:00Z"
+				}
+			]
+		}`))
 	}))
 	defer ts.Close()
 
@@ -454,6 +505,9 @@ func TestListConnections_EncodesQueryParametersAndEscapesSpaces(t *testing.T) {
 
 	if resp.TotalCount != 1 || len(resp.Connections) != 1 || resp.Connections[0].Name != "k8s cluster" {
 		t.Errorf("unexpected connection response: %+v", resp)
+	}
+	if resp.Connections[0].CredentialID != "cred-1" || resp.Connections[0].UserID != "user-1" {
+		t.Errorf("failed to decode schema-backed credentialId or user_id fields: %+v", resp.Connections[0])
 	}
 }
 
