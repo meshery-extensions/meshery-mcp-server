@@ -55,10 +55,10 @@ func (c *Client) ListEnvironments(ctx context.Context, opts ListOptions) (*Envir
 	return &resp, nil
 }
 
-// ListModels retrieves a paginated list of component models (GET /api/meshmodels/models).
+// ListModels retrieves a paginated list of MeshModel registry models (GET /api/registry/models).
 func (c *Client) ListModels(ctx context.Context, opts ListOptions) (*ModelResponse, error) {
 	var resp ModelResponse
-	err := c.do(ctx, http.MethodGet, "/api/meshmodels/models", opts.EncodeValues(), nil, &resp)
+	err := c.do(ctx, http.MethodGet, "/api/registry/models", opts.EncodeValues(), nil, &resp)
 	if err != nil {
 		return nil, err
 	}

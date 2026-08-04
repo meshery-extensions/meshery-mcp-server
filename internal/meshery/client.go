@@ -31,8 +31,8 @@ func NewClient(cfg Config) (*Client, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("base URL host cannot be empty")
 	}
-	if cfg.Timeout < 0 {
-		return nil, fmt.Errorf("timeout cannot be negative")
+	if cfg.Timeout <= 0 {
+		return nil, fmt.Errorf("timeout must be greater than zero")
 	}
 	if cfg.RetryCount < 0 {
 		return nil, fmt.Errorf("retry_count cannot be negative")
@@ -64,7 +64,7 @@ func (c *Client) do(
 	if err != nil {
 		return fmt.Errorf("invalid base URL: %w", err)
 	}
-	u.Path = path
+	u = u.JoinPath(path)
 	if query != nil {
 		u.RawQuery = query.Encode()
 	}
@@ -81,10 +81,11 @@ func (c *Client) do(
 	var lastErr error
 	for attempt := 0; attempt <= c.cfg.RetryCount; attempt++ {
 		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * 100 * time.Millisecond
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
+			case <-time.After(backoff):
 			}
 		}
 
@@ -132,6 +133,10 @@ func (c *Client) do(
 				continue
 			}
 			return apiErr
+		}
+
+		if resp.StatusCode == http.StatusNoContent || len(respData) == 0 {
+			return nil
 		}
 
 		if respBody != nil {
@@ -187,5 +192,6 @@ func isRetryableErr(err error) bool {
 func isRetryableStatusCode(statusCode int) bool {
 	return statusCode == http.StatusBadGateway ||
 		statusCode == http.StatusServiceUnavailable ||
-		statusCode == http.StatusGatewayTimeout
+		statusCode == http.StatusGatewayTimeout ||
+		statusCode == http.StatusTooManyRequests
 }

@@ -23,22 +23,22 @@ func TestNewClient_ValidatesBaseURLSchemeAndHost(t *testing.T) {
 	}{
 		{
 			name:    "valid http URL",
-			cfg:     Config{BaseURL: "http://localhost:9081"},
+			cfg:     Config{BaseURL: "http://localhost:9081", Timeout: 10 * time.Second},
 			wantErr: false,
 		},
 		{
 			name:    "valid https URL",
-			cfg:     Config{BaseURL: "https://cloud.meshery.io"},
+			cfg:     Config{BaseURL: "https://cloud.meshery.io", Timeout: 10 * time.Second},
 			wantErr: false,
 		},
 		{
 			name:    "missing scheme",
-			cfg:     Config{BaseURL: "localhost:9081"},
+			cfg:     Config{BaseURL: "localhost:9081", Timeout: 10 * time.Second},
 			wantErr: true,
 		},
 		{
 			name:    "invalid scheme",
-			cfg:     Config{BaseURL: "ftp://localhost:9081"},
+			cfg:     Config{BaseURL: "ftp://localhost:9081", Timeout: 10 * time.Second},
 			wantErr: true,
 		},
 		{
@@ -47,8 +47,13 @@ func TestNewClient_ValidatesBaseURLSchemeAndHost(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "zero timeout",
+			cfg:     Config{BaseURL: "http://localhost:9081", Timeout: 0},
+			wantErr: true,
+		},
+		{
 			name:    "negative retry count",
-			cfg:     Config{BaseURL: "http://localhost:9081", RetryCount: -1},
+			cfg:     Config{BaseURL: "http://localhost:9081", Timeout: 10 * time.Second, RetryCount: -1},
 			wantErr: true,
 		},
 	}
@@ -87,7 +92,7 @@ func TestPing_ReachableServer_ReturnsVersionInfo(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(Config{BaseURL: ts.URL})
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -141,6 +146,7 @@ func TestClient_AllHTTPCalls_IncludeAuthorizationHeader(t *testing.T) {
 	client, err := NewClient(Config{
 		BaseURL: ts.URL,
 		Token:   token,
+		Timeout: 5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
@@ -202,7 +208,8 @@ func TestClient_InjectsStandardHeaders(t *testing.T) {
 
 	client, err := NewClient(Config{
 		BaseURL:   ts.URL,
-		UserAgent: "custom-agent/1.0",
+		UserAgent: "meshery-mcp-server/0.1.0",
+		Timeout:   5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
@@ -216,8 +223,8 @@ func TestClient_InjectsStandardHeaders(t *testing.T) {
 	if acceptHeader != "application/json" {
 		t.Errorf("expected Accept header 'application/json', got %q", acceptHeader)
 	}
-	if userAgentHeader != "custom-agent/1.0" {
-		t.Errorf("expected User-Agent header 'custom-agent/1.0', got %q", userAgentHeader)
+	if userAgentHeader != "meshery-mcp-server/0.1.0" {
+		t.Errorf("expected User-Agent header 'meshery-mcp-server/0.1.0', got %q", userAgentHeader)
 	}
 }
 
@@ -243,6 +250,7 @@ func TestClient_PreservesRequestBodyOnRetry(t *testing.T) {
 
 	client, err := NewClient(Config{
 		BaseURL:    ts.URL,
+		Timeout:    5 * time.Second,
 		RetryCount: 1,
 	})
 	if err != nil {
@@ -282,6 +290,7 @@ func TestClient_RetriesOn5xx_NoRetryOn4xx(t *testing.T) {
 
 		client, err := NewClient(Config{
 			BaseURL:    ts.URL,
+			Timeout:    5 * time.Second,
 			RetryCount: 2,
 		})
 		if err != nil {
@@ -309,6 +318,7 @@ func TestClient_RetriesOn5xx_NoRetryOn4xx(t *testing.T) {
 
 		client, err := NewClient(Config{
 			BaseURL:    ts.URL,
+			Timeout:    5 * time.Second,
 			RetryCount: 2,
 		})
 		if err != nil {
@@ -335,7 +345,7 @@ func TestAPIError_StandardErrorHandling(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(Config{BaseURL: ts.URL})
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -358,7 +368,57 @@ func TestAPIError_StandardErrorHandling(t *testing.T) {
 	}
 }
 
-func TestListConnections_EncodesQueryParameters(t *testing.T) {
+func TestClient_HandlesBaseURLWithPathPrefix(t *testing.T) {
+	t.Parallel()
+
+	var receivedPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Version{Build: "v1.0.0"})
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(Config{
+		BaseURL: ts.URL + "/meshery-prefix",
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	_, err = client.Ping(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedPath := "/meshery-prefix/api/system/version"
+	if receivedPath != expectedPath {
+		t.Errorf("expected path %q, got %q", expectedPath, receivedPath)
+	}
+}
+
+func TestClient_Handles204NoContent(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	var resp map[string]string
+	err = client.do(context.Background(), http.MethodDelete, "/api/resource", nil, nil, &resp)
+	if err != nil {
+		t.Fatalf("expected 204 No Content to return nil error, got: %v", err)
+	}
+}
+
+func TestListConnections_EncodesQueryParametersAndEscapesSpaces(t *testing.T) {
 	t.Parallel()
 
 	var receivedQuery string
@@ -369,12 +429,12 @@ func TestListConnections_EncodesQueryParameters(t *testing.T) {
 			Page:        1,
 			PageSize:    10,
 			TotalCount:  1,
-			Connections: []Connection{{ID: "conn-1", Name: "k8s-cluster"}},
+			Connections: []Connection{{ID: "conn-1", Name: "k8s cluster"}},
 		})
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(Config{BaseURL: ts.URL})
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -382,17 +442,17 @@ func TestListConnections_EncodesQueryParameters(t *testing.T) {
 	resp, err := client.ListConnections(context.Background(), ListOptions{
 		Page:     1,
 		PageSize: 10,
-		Search:   "k8s",
+		Search:   "k8s cluster",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(receivedQuery, "page=1") || !strings.Contains(receivedQuery, "pagesize=10") || !strings.Contains(receivedQuery, "search=k8s") {
+	if !strings.Contains(receivedQuery, "page=1") || !strings.Contains(receivedQuery, "pageSize=10") || !strings.Contains(receivedQuery, "search=k8s+cluster") {
 		t.Errorf("unexpected query string encoding: %s", receivedQuery)
 	}
 
-	if resp.TotalCount != 1 || len(resp.Connections) != 1 || resp.Connections[0].Name != "k8s-cluster" {
+	if resp.TotalCount != 1 || len(resp.Connections) != 1 || resp.Connections[0].Name != "k8s cluster" {
 		t.Errorf("unexpected connection response: %+v", resp)
 	}
 }
@@ -411,7 +471,7 @@ func TestListPatterns_EncodesQueryParameters(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(Config{BaseURL: ts.URL})
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -444,7 +504,7 @@ func TestListWorkspaces_EncodesQueryParameters(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(Config{BaseURL: ts.URL})
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -473,7 +533,7 @@ func TestListEnvironments_EncodesQueryParameters(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(Config{BaseURL: ts.URL})
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -502,7 +562,7 @@ func TestListModels_EncodesQueryParameters(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(Config{BaseURL: ts.URL})
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -531,7 +591,7 @@ func TestListPerformanceProfiles_EncodesQueryParameters(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(Config{BaseURL: ts.URL})
+	client, err := NewClient(Config{BaseURL: ts.URL, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}

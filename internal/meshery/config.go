@@ -21,6 +21,6 @@ func DefaultConfig() Config {
 		BaseURL:    "http://localhost:9081",
 		Timeout:    10 * time.Second,
 		RetryCount: 2,
-		UserAgent:  "meshery-mcp-server",
+		UserAgent:  "meshery-mcp-server/0.1.0",
 	}
 }
