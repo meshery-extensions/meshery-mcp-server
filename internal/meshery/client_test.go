@@ -429,3 +429,119 @@ func TestListPatterns_EncodesQueryParameters(t *testing.T) {
 		t.Errorf("unexpected pattern response: %+v", resp)
 	}
 }
+
+func TestListWorkspaces_EncodesQueryParameters(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkspaceResponse{
+			Page:       1,
+			PageSize:   10,
+			TotalCount: 1,
+			Workspaces: []Workspace{{ID: "ws-1", Name: "staging-ws"}},
+		})
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(Config{BaseURL: ts.URL})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.ListWorkspaces(context.Background(), ListOptions{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.TotalCount != 1 || len(resp.Workspaces) != 1 || resp.Workspaces[0].Name != "staging-ws" {
+		t.Errorf("unexpected workspace response: %+v", resp)
+	}
+}
+
+func TestListEnvironments_EncodesQueryParameters(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(EnvironmentResponse{
+			Page:         1,
+			PageSize:     10,
+			TotalCount:   1,
+			Environments: []Environment{{ID: "env-1", Name: "prod-env"}},
+		})
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(Config{BaseURL: ts.URL})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.ListEnvironments(context.Background(), ListOptions{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.TotalCount != 1 || len(resp.Environments) != 1 || resp.Environments[0].Name != "prod-env" {
+		t.Errorf("unexpected environment response: %+v", resp)
+	}
+}
+
+func TestListModels_EncodesQueryParameters(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ModelResponse{
+			Page:       1,
+			PageSize:   10,
+			TotalCount: 1,
+			Models:     []Model{{ID: "mod-1", Name: "kubernetes"}},
+		})
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(Config{BaseURL: ts.URL})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.ListModels(context.Background(), ListOptions{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.TotalCount != 1 || len(resp.Models) != 1 || resp.Models[0].Name != "kubernetes" {
+		t.Errorf("unexpected model response: %+v", resp)
+	}
+}
+
+func TestListPerformanceProfiles_EncodesQueryParameters(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(PerformanceProfileResponse{
+			Page:       1,
+			PageSize:   10,
+			TotalCount: 1,
+			Profiles:   []PerformanceProfile{{ID: "prof-1", Name: "soak-test"}},
+		})
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(Config{BaseURL: ts.URL})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.ListPerformanceProfiles(context.Background(), ListOptions{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.TotalCount != 1 || len(resp.Profiles) != 1 || resp.Profiles[0].Name != "soak-test" {
+		t.Errorf("unexpected performance profile response: %+v", resp)
+	}
+}

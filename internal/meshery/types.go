@@ -86,3 +86,76 @@ type PatternResponse struct {
 	TotalCount int       `json:"total_count"`
 	Patterns   []Pattern `json:"patterns"`
 }
+
+// Workspace represents a workspace object returned by the Meshery REST API.
+type Workspace struct {
+	ID          string                 `json:"id,omitempty"`
+	Name        string                 `json:"name,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt   string                 `json:"created_at,omitempty"`
+	UpdatedAt   string                 `json:"updated_at,omitempty"`
+}
+
+// WorkspaceResponse represents the envelope response for workspaces list endpoint.
+type WorkspaceResponse struct {
+	Page       int         `json:"page"`
+	PageSize   int         `json:"page_size"`
+	TotalCount int         `json:"total_count"`
+	Workspaces []Workspace `json:"workspaces"`
+}
+
+// Environment represents an environment object returned by the Meshery REST API.
+type Environment struct {
+	ID          string                 `json:"id,omitempty"`
+	Name        string                 `json:"name,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt   string                 `json:"created_at,omitempty"`
+	UpdatedAt   string                 `json:"updated_at,omitempty"`
+}
+
+// EnvironmentResponse represents the envelope response for environments list endpoint.
+type EnvironmentResponse struct {
+	Page         int           `json:"page"`
+	PageSize     int           `json:"page_size"`
+	TotalCount   int           `json:"total_count"`
+	Environments []Environment `json:"environments"`
+}
+
+// Model represents a MeshModel component object returned by the Meshery REST API.
+type Model struct {
+	ID          string                 `json:"id,omitempty"`
+	Name        string                 `json:"name,omitempty"`
+	Version     string                 `json:"version,omitempty"`
+	DisplayName string                 `json:"display_name,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ModelResponse represents the envelope response for models list endpoint.
+type ModelResponse struct {
+	Page       int     `json:"page"`
+	PageSize   int     `json:"page_size"`
+	TotalCount int     `json:"total_count"`
+	Models     []Model `json:"models"`
+}
+
+// PerformanceProfile represents a performance profile object returned by the Meshery REST API.
+type PerformanceProfile struct {
+	ID                 string                 `json:"id,omitempty"`
+	Name               string                 `json:"name,omitempty"`
+	ServiceMesh        string                 `json:"service_mesh,omitempty"`
+	ConcurrentRequests int                    `json:"concurrent_requests,omitempty"`
+	Duration           string                 `json:"duration,omitempty"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt          string                 `json:"created_at,omitempty"`
+	UpdatedAt          string                 `json:"updated_at,omitempty"`
+}
+
+// PerformanceProfileResponse represents the envelope response for performance profiles list endpoint.
+type PerformanceProfileResponse struct {
+	Page       int                  `json:"page"`
+	PageSize   int                  `json:"page_size"`
+	TotalCount int                  `json:"total_count"`
+	Profiles   []PerformanceProfile `json:"profiles"`
+}
