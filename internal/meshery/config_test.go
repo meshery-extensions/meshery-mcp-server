@@ -8,7 +8,8 @@ import (
 )
 
 func TestLoadConfig_Defaults(t *testing.T) {
-	t.Parallel()
+	t.Setenv("MESHERY_SERVER_URL", "")
+	t.Setenv("MESHERY_API_TOKEN", "")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -30,7 +31,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 }
 
 func TestLoadConfig_ConfigFile_PartialOverride(t *testing.T) {
-	t.Parallel()
+	t.Setenv("MESHERY_SERVER_URL", "")
+	t.Setenv("MESHERY_API_TOKEN", "")
 
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "config.json")
@@ -91,7 +93,8 @@ func TestLoadConfig_EnvironmentVariables(t *testing.T) {
 }
 
 func TestLoadConfig_FileNotFound(t *testing.T) {
-	t.Parallel()
+	t.Setenv("MESHERY_SERVER_URL", "")
+	t.Setenv("MESHERY_API_TOKEN", "")
 
 	_, err := LoadConfig("/nonexistent/path/config.json")
 	if err == nil {
@@ -100,7 +103,8 @@ func TestLoadConfig_FileNotFound(t *testing.T) {
 }
 
 func TestLoadConfig_InvalidJSON(t *testing.T) {
-	t.Parallel()
+	t.Setenv("MESHERY_SERVER_URL", "")
+	t.Setenv("MESHERY_API_TOKEN", "")
 
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "invalid.json")
