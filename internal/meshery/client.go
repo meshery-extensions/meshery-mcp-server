@@ -20,6 +20,7 @@ type Client struct {
 }
 
 // NewClient initializes and validates a new Meshery REST Client with the given configuration.
+// If a custom HTTPClient is supplied in cfg, its Timeout property will be set to cfg.Timeout.
 func NewClient(cfg Config) (*Client, error) {
 	u, err := url.Parse(cfg.BaseURL)
 	if err != nil {
@@ -43,6 +44,8 @@ func NewClient(cfg Config) (*Client, error) {
 		httpClient = &http.Client{
 			Timeout: cfg.Timeout,
 		}
+	} else {
+		httpClient.Timeout = cfg.Timeout
 	}
 
 	return &Client{
@@ -112,8 +115,8 @@ func (c *Client) do(
 
 		resp, err := c.http.Do(req)
 		if err != nil {
-			lastErr = err
-			if isRetryableErr(err) {
+			if isRetryableErr(err) && isRetryableMethod(method) {
+				lastErr = err
 				continue
 			}
 			return err
@@ -122,13 +125,12 @@ func (c *Client) do(
 		respData, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if readErr != nil {
-			lastErr = readErr
-			continue
+			return readErr
 		}
 
 		if resp.StatusCode >= 400 {
 			apiErr := parseAPIError(resp.StatusCode, method, fullURL, respData)
-			if isRetryableStatusCode(resp.StatusCode) {
+			if isRetryableStatusCode(resp.StatusCode) && isRetryableMethod(method) {
 				lastErr = apiErr
 				continue
 			}
@@ -174,6 +176,11 @@ func parseAPIError(statusCode int, method, reqURL string, body []byte) *APIError
 		Message:    msg,
 		RawBody:    body,
 	}
+}
+
+// isRetryableMethod classifies whether an HTTP method is safe to retry automatically.
+func isRetryableMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead
 }
 
 // isRetryableErr classifies whether a network error should trigger a retry attempt.

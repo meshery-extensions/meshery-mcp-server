@@ -12,7 +12,9 @@ type Config struct {
 	Timeout    time.Duration `json:"timeout" yaml:"timeout"`
 	RetryCount int           `json:"retry_count" yaml:"retry_count"`
 	UserAgent  string        `json:"user_agent" yaml:"user_agent"`
-	HTTPClient *http.Client  `json:"-" yaml:"-"`
+	// HTTPClient allows supplying a custom http.Client. When supplied, its Timeout field
+	// will be set to Config.Timeout.
+	HTTPClient *http.Client `json:"-" yaml:"-"`
 }
 
 // DefaultConfig returns a Config initialized with sensible default values.
