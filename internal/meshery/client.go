@@ -32,6 +32,12 @@ func NewClient(cfg Config) (*Client, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("base URL host cannot be empty")
 	}
+	if cfg.Token != "" && u.Scheme == "http" {
+		host := u.Hostname()
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return nil, fmt.Errorf("bearer tokens require HTTPS unless using a loopback address")
+		}
+	}
 	if cfg.Timeout <= 0 {
 		return nil, fmt.Errorf("timeout must be greater than zero")
 	}

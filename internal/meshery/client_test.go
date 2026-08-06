@@ -37,6 +37,12 @@ func TestNewClient_ValidatesBaseURLSchemeAndHost(t *testing.T) {
 	}{
 		{name: "valid http URL", cfg: Config{BaseURL: "http://localhost:9081", Timeout: 10 * time.Second}},
 		{name: "valid https URL", cfg: Config{BaseURL: "https://cloud.meshery.io", Timeout: 10 * time.Second}},
+		{name: "http localhost with token", cfg: Config{BaseURL: "http://localhost:9081", Token: "secret", Timeout: 10 * time.Second}},
+		{name: "http 127.0.0.1 with token", cfg: Config{BaseURL: "http://127.0.0.1:9081", Token: "secret", Timeout: 10 * time.Second}},
+		{name: "http ipv6 loopback with token", cfg: Config{BaseURL: "http://[::1]:9081", Token: "secret", Timeout: 10 * time.Second}},
+		{name: "http non-loopback with token fails", cfg: Config{BaseURL: "http://example.com:9081", Token: "secret", Timeout: 10 * time.Second}, wantErr: true},
+		{name: "http non-loopback without token succeeds", cfg: Config{BaseURL: "http://example.com:9081", Timeout: 10 * time.Second}},
+		{name: "https non-loopback with token succeeds", cfg: Config{BaseURL: "https://example.com:9081", Token: "secret", Timeout: 10 * time.Second}},
 		{name: "missing scheme", cfg: Config{BaseURL: "localhost:9081", Timeout: 10 * time.Second}, wantErr: true},
 		{name: "invalid scheme", cfg: Config{BaseURL: "ftp://localhost:9081", Timeout: 10 * time.Second}, wantErr: true},
 		{name: "negative timeout", cfg: Config{BaseURL: "http://localhost:9081", Timeout: -1 * time.Second}, wantErr: true},
