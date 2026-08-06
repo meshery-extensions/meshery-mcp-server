@@ -11,12 +11,15 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/meshery/meshkit/utils"
 )
 
 // Client handles REST API communications with a running Meshery Server instance.
 type Client struct {
-	cfg  Config
-	http *http.Client
+	cfg     Config
+	baseURL *url.URL
+	http    *http.Client
 }
 
 // NewClient initializes and validates a new Meshery REST Client with the given configuration.
@@ -24,25 +27,25 @@ type Client struct {
 func NewClient(cfg Config) (*Client, error) {
 	u, err := url.Parse(cfg.BaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid base URL: %w", err)
+		return nil, ErrInvalidBaseURL(err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("base URL scheme must be http or https, got %q", u.Scheme)
+		return nil, ErrInvalidBaseURL(fmt.Errorf("base URL scheme must be http or https, got %q", u.Scheme))
 	}
 	if u.Host == "" {
-		return nil, fmt.Errorf("base URL host cannot be empty")
+		return nil, ErrInvalidBaseURL(errors.New("base URL host cannot be empty"))
 	}
 	if cfg.Token != "" && u.Scheme == "http" {
 		host := u.Hostname()
 		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
-			return nil, fmt.Errorf("bearer tokens require HTTPS unless using a loopback address")
+			return nil, ErrInvalidBaseURL(errors.New("bearer tokens require HTTPS unless using a loopback address"))
 		}
 	}
 	if cfg.Timeout <= 0 {
-		return nil, fmt.Errorf("timeout must be greater than zero")
+		return nil, ErrInvalidTimeout(cfg.Timeout)
 	}
 	if cfg.RetryCount < 0 {
-		return nil, fmt.Errorf("retry_count cannot be negative")
+		return nil, ErrInvalidRetryCount(cfg.RetryCount)
 	}
 
 	httpClient := cfg.HTTPClient
@@ -55,8 +58,9 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 
 	return &Client{
-		cfg:  cfg,
-		http: httpClient,
+		cfg:     cfg,
+		baseURL: u,
+		http:    httpClient,
 	}, nil
 }
 
@@ -69,21 +73,19 @@ func (c *Client) do(
 	reqBody any,
 	respBody any,
 ) error {
-	u, err := url.Parse(c.cfg.BaseURL)
-	if err != nil {
-		return fmt.Errorf("invalid base URL: %w", err)
-	}
-	u = u.JoinPath(path)
+	u := *c.baseURL
+	reqURL := u.JoinPath(path)
 	if query != nil {
-		u.RawQuery = query.Encode()
+		reqURL.RawQuery = query.Encode()
 	}
-	fullURL := u.String()
+	fullURL := reqURL.String()
 
 	var payload []byte
 	if reqBody != nil {
+		var err error
 		payload, err = json.Marshal(reqBody)
 		if err != nil {
-			return fmt.Errorf("failed to marshal request body: %w", err)
+			return utils.ErrMarshal(err)
 		}
 	}
 
@@ -105,7 +107,7 @@ func (c *Client) do(
 
 		req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
+			return ErrHTTPRequest(err, method, fullURL)
 		}
 
 		req.Header.Set("Accept", "application/json")
@@ -121,11 +123,12 @@ func (c *Client) do(
 
 		resp, err := c.http.Do(req)
 		if err != nil {
+			meshErr := ErrHTTPRequest(err, method, fullURL)
 			if isRetryableErr(err) && isRetryableMethod(method) {
-				lastErr = err
+				lastErr = meshErr
 				continue
 			}
-			return err
+			return meshErr
 		}
 
 		respData, readErr := io.ReadAll(resp.Body)
@@ -135,7 +138,19 @@ func (c *Client) do(
 		}
 
 		if resp.StatusCode >= 400 {
-			apiErr := parseAPIError(resp.StatusCode, method, fullURL, respData)
+			msg := string(respData)
+			var errPayload struct {
+				Message string `json:"message"`
+				Error   string `json:"error"`
+			}
+			if err := json.Unmarshal(respData, &errPayload); err == nil {
+				if errPayload.Message != "" {
+					msg = errPayload.Message
+				} else if errPayload.Error != "" {
+					msg = errPayload.Error
+				}
+			}
+			apiErr := ErrAPIResponse(resp.StatusCode, method, fullURL, msg)
 			if isRetryableStatusCode(resp.StatusCode) && isRetryableMethod(method) {
 				lastErr = apiErr
 				continue
@@ -149,7 +164,7 @@ func (c *Client) do(
 
 		if respBody != nil {
 			if err := json.Unmarshal(respData, respBody); err != nil {
-				return fmt.Errorf("failed to unmarshal response: %w", err)
+				return utils.ErrUnmarshal(err)
 			}
 		}
 
@@ -157,31 +172,6 @@ func (c *Client) do(
 	}
 
 	return lastErr
-}
-
-// parseAPIError constructs an APIError from an HTTP error status code and body bytes.
-func parseAPIError(statusCode int, method, reqURL string, body []byte) *APIError {
-	msg := string(body)
-
-	var errPayload struct {
-		Message string `json:"message"`
-		Error   string `json:"error"`
-	}
-	if err := json.Unmarshal(body, &errPayload); err == nil {
-		if errPayload.Message != "" {
-			msg = errPayload.Message
-		} else if errPayload.Error != "" {
-			msg = errPayload.Error
-		}
-	}
-
-	return &APIError{
-		StatusCode: statusCode,
-		Method:     method,
-		URL:        reqURL,
-		Message:    msg,
-		RawBody:    body,
-	}
 }
 
 // isRetryableMethod classifies whether an HTTP method is safe to retry automatically.

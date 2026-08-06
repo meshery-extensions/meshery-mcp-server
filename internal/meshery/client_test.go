@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	meshkitErrors "github.com/meshery/meshkit/errors"
 )
 
 func newTestServer(t *testing.T, handler http.HandlerFunc, opts ...func(*Config)) (*Client, *httptest.Server) {
@@ -123,7 +125,7 @@ func TestPing_UnreachableServer_ReturnsDescriptiveError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unreachable server, got nil")
 	}
-	if !strings.Contains(err.Error(), "connection") && !strings.Contains(err.Error(), "refused") && !strings.Contains(err.Error(), "dial") {
+	if !strings.Contains(err.Error(), "connection") && !strings.Contains(err.Error(), "refused") && !strings.Contains(err.Error(), "dial") && !strings.Contains(err.Error(), "failed") {
 		t.Errorf("expected descriptive network error, got: %v", err)
 	}
 }
@@ -257,15 +259,15 @@ func TestAPIError_StandardErrorHandling(t *testing.T) {
 		t.Fatal("expected error on 404, got nil")
 	}
 
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected error of type *APIError, got %T", err)
+	var meshErr *meshkitErrors.Error
+	if !errors.As(err, &meshErr) {
+		t.Fatalf("expected error of type *meshkitErrors.Error, got %T", err)
 	}
-	if apiErr.StatusCode != http.StatusNotFound {
-		t.Errorf("expected StatusCode 404, got %d", apiErr.StatusCode)
+	if meshErr.Code != ErrAPIResponseCode {
+		t.Errorf("expected error code %s, got %s", ErrAPIResponseCode, meshErr.Code)
 	}
-	if apiErr.Message != "connection not found" {
-		t.Errorf("expected parsed JSON message 'connection not found', got %q", apiErr.Message)
+	if !strings.Contains(meshErr.Error(), "connection not found") {
+		t.Errorf("expected error message to contain 'connection not found', got %q", meshErr.Error())
 	}
 }
 
@@ -393,11 +395,14 @@ func TestListWrappers_EncodesQueryParametersAndParsesResponse(t *testing.T) {
 		{
 			name:       "ListConnections",
 			path:       "/api/integrations/connections",
-			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"connections":[{"id":"conn-1","name":"k8s cluster"}]}`,
+			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"connections":[{"id":"123e4567-e89b-12d3-a456-426614174000","name":"k8s cluster"}]}`,
 			call: func(ctx context.Context, c *Client) (int, error) {
 				resp, err := c.ListConnections(ctx, ListOptions{Page: 1, PageSize: 10, Search: "k8s cluster"})
 				if err != nil {
 					return 0, err
+				}
+				if len(resp.Connections) != 1 {
+					return 0, errors.New("expected 1 connection item in payload")
 				}
 				return resp.TotalCount, nil
 			},
@@ -405,23 +410,32 @@ func TestListWrappers_EncodesQueryParametersAndParsesResponse(t *testing.T) {
 		{
 			name:       "ListPatterns",
 			path:       "/api/pattern",
-			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"patterns":[{"id":"pat-1","name":"istio-app"}]}`,
+			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"patterns":[{"id":"123e4567-e89b-12d3-a456-426614174000","name":"istio-app"}]}`,
 			call: func(ctx context.Context, c *Client) (int, error) {
 				resp, err := c.ListPatterns(ctx, ListOptions{Page: 1, PageSize: 10, Search: "istio"})
 				if err != nil {
 					return 0, err
 				}
-				return resp.TotalCount, nil
+				if resp.Patterns == nil || len(*resp.Patterns) != 1 {
+					return 0, errors.New("expected 1 pattern item in payload")
+				}
+				if resp.TotalCount == nil {
+					return 0, nil
+				}
+				return *resp.TotalCount, nil
 			},
 		},
 		{
 			name:       "ListWorkspaces",
 			path:       "/api/workspaces",
-			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"workspaces":[{"id":"ws-1","name":"staging-ws"}]}`,
+			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"workspaces":[{"id":"123e4567-e89b-12d3-a456-426614174000","name":"staging-ws"}]}`,
 			call: func(ctx context.Context, c *Client) (int, error) {
 				resp, err := c.ListWorkspaces(ctx, ListOptions{Page: 1, PageSize: 10})
 				if err != nil {
 					return 0, err
+				}
+				if len(resp.Workspaces) != 1 {
+					return 0, errors.New("expected 1 workspace item in payload")
 				}
 				return resp.TotalCount, nil
 			},
@@ -429,7 +443,7 @@ func TestListWrappers_EncodesQueryParametersAndParsesResponse(t *testing.T) {
 		{
 			name:       "ListEnvironments",
 			path:       "/api/environments",
-			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"environments":[{"id":"env-1","name":"prod-env"}]}`,
+			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"environments":[{"id":"123e4567-e89b-12d3-a456-426614174000","name":"prod-env"}]}`,
 			call: func(ctx context.Context, c *Client) (int, error) {
 				resp, err := c.ListEnvironments(ctx, ListOptions{Page: 1, PageSize: 10})
 				if err != nil {
@@ -441,19 +455,22 @@ func TestListWrappers_EncodesQueryParametersAndParsesResponse(t *testing.T) {
 		{
 			name:       "ListModels",
 			path:       "/api/registry/models",
-			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"models":[{"id":"mod-1","name":"kubernetes"}]}`,
+			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"models":[{"id":"123e4567-e89b-12d3-a456-426614174000","name":"kubernetes"}]}`,
 			call: func(ctx context.Context, c *Client) (int, error) {
 				resp, err := c.ListModels(ctx, ListOptions{Page: 1, PageSize: 10})
 				if err != nil {
 					return 0, err
 				}
-				return resp.TotalCount, nil
+				if resp.TotalCount == nil {
+					return 0, nil
+				}
+				return *resp.TotalCount, nil
 			},
 		},
 		{
 			name:       "ListPerformanceProfiles",
 			path:       "/api/user/performance/profiles",
-			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"profiles":[{"id":"prof-1","name":"soak-test"}]}`,
+			sampleBody: `{"page":1,"pageSize":10,"totalCount":1,"profiles":[{"id":"123e4567-e89b-12d3-a456-426614174000","name":"soak-test"}]}`,
 			call: func(ctx context.Context, c *Client) (int, error) {
 				resp, err := c.ListPerformanceProfiles(ctx, ListOptions{Page: 1, PageSize: 10})
 				if err != nil {
