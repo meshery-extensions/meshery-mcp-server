@@ -1,0 +1,10 @@
+# Version control
+.git
+.gitignore
+
+# Build artifacts
+bin
+coverage.txt
+
+# Docs
+README.md
