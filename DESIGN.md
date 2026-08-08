@@ -31,16 +31,15 @@ The MCP Server will interact with Meshery using **REST APIs only** (no GraphQL),
 Key aspects:
 
 - Use the shared Meshery REST client as the single integration layer between the MCP Server and Meshery.
-- Configure the client with the appropriate Meshery base URL and authentication.
-- Keep the MCP Server’s design and tools aligned with any changes in the REST client and Meshery’s REST APIs.
+- Configure the client with the appropriate Meshery base URL and cookie-based authentication. Meshery data routes use the `token` and `meshery-provider` cookies written by `mesheryctl system login`; the shared client should not assume an `Authorization: Bearer` flow for these routes.- Keep the MCP Server’s design and tools aligned with any changes in the REST client and Meshery’s REST APIs.
 
 ### Data shape and pagination
 
-MCP tools will use Meshery REST APIs through the shared REST client. Existing proof-of-concept work shows that some Meshery API responses include camelCase fields such as `pageSize` and `totalCount`.
+MCP tools will use Meshery REST APIs through the shared REST client. For the list-designs API, the known REST response fields are `page`, `pageSize`, `totalCount`, and `patterns`.
 
-Each MCP tool should document its response shape and pagination behavior. Where a tool transforms a REST response, the transformation should be explicit so MCP clients and AI agents receive predictable, stable results.
+The shared REST client should use explicit JSON tags, or equivalent field mapping, to correctly parse Meshery’s camelCase response fields. The `list_designs` MCP tool should expose a documented, stable response contract that identifies the returned design data and pagination metadata.
 
-The tool definitions will continue to incorporate relevant findings from the proof-of-concept, including the existing `list_designs` implementation, while remaining aligned with future Meshery REST client improvements.
+Where a tool transforms a REST response, the transformation should be explicit and documented so MCP clients and AI agents receive predictable, stable results. Tool definitions will continue to incorporate relevant findings from the existing proof-of-concept while remaining aligned with future Meshery REST client improvements.
 
 ## Initial MCP Tools
 
