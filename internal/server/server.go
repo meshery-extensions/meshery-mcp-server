@@ -17,14 +17,16 @@ package server
 import (
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/meshery-extensions/meshery-mcp-server/internal/config"
 	"github.com/meshery-extensions/meshery-mcp-server/internal/tools"
 	"github.com/meshery-extensions/meshery-mcp-server/internal/version"
 )
 
 // New creates an MCP server with all registered tools.
-func New() *server.MCPServer {
+// The config.Manager enables context management tools; pass nil for basic mode.
+func New(mgr *config.Manager) *server.MCPServer {
 	s := server.NewMCPServer(version.Name, version.Version)
-	tools.Register(s)
+	tools.Register(s, mgr)
 	return s
 }
 

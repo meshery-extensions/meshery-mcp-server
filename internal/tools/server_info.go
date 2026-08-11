@@ -21,15 +21,42 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/meshery-extensions/meshery-mcp-server/internal/config"
 	"github.com/meshery-extensions/meshery-mcp-server/internal/version"
 )
 
 // Register registers all tools exposed by the Meshery MCP server.
-func Register(s *server.MCPServer) {
+// The config.Manager is optional; if nil, context management tools are not registered.
+func Register(s *server.MCPServer, mgr *config.Manager) {
+	// Server info tool
 	serverInfo := mcp.NewTool("server_info",
 		mcp.WithDescription("Return metadata about the Meshery MCP server."),
 	)
 	s.AddTool(serverInfo, serverInfoHandler)
+
+	// Context management tools (only if manager is provided)
+	if mgr != nil {
+		registerContextTools(s, mgr)
+	}
+}
+
+// registerContextTools registers the context management MCP tools.
+func registerContextTools(s *server.MCPServer, mgr *config.Manager) {
+	// list_contexts tool
+	listContexts := mcp.NewTool("list_contexts",
+		mcp.WithDescription("List all configured Meshery instances and show which is active."),
+	)
+	s.AddTool(listContexts, listContextsHandler(mgr))
+
+	// switch_context tool
+	switchContext := mcp.NewTool("switch_context",
+		mcp.WithDescription("Switch the active Meshery instance context. Subsequent tool calls will use the new instance."),
+		mcp.WithString("context",
+			mcp.Required(),
+			mcp.Description("Name of the context to switch to (e.g., 'dev', 'staging', 'production')"),
+		),
+	)
+	s.AddTool(switchContext, switchContextHandler(mgr))
 }
 
 func serverInfoHandler(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
