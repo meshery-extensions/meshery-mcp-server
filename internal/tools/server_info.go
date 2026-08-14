@@ -31,6 +31,8 @@ func Register(s *server.MCPServer, mgr *config.Manager) {
 	// Server info tool
 	serverInfo := mcp.NewTool("server_info",
 		mcp.WithDescription("Return metadata about the Meshery MCP server."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 	)
 	s.AddTool(serverInfo, serverInfoHandler)
 
@@ -45,6 +47,8 @@ func registerContextTools(s *server.MCPServer, mgr *config.Manager) {
 	// list_contexts tool
 	listContexts := mcp.NewTool("list_contexts",
 		mcp.WithDescription("List all configured Meshery instances and show which is active."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 	)
 	s.AddTool(listContexts, listContextsHandler(mgr))
 

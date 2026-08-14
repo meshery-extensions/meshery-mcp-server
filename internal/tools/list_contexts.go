@@ -27,10 +27,11 @@ import (
 
 // ContextInfo represents a context in the list response.
 type ContextInfo struct {
-	Name   string `json:"name"`
-	Server string `json:"server"`
-	Token  string `json:"token"`
-	Active bool   `json:"active"`
+	Name     string `json:"name"`
+	Server   string `json:"server"`
+	Token    string `json:"token"`
+	Provider string `json:"provider,omitempty"`
+	Active   bool   `json:"active"`
 }
 
 // ListContextsResponse is the response format for list_contexts.
@@ -59,10 +60,11 @@ func listContextsHandler(mgr *config.Manager) func(context.Context, mcp.CallTool
 		for _, name := range names {
 			ctx := contexts[name]
 			contextInfos = append(contextInfos, ContextInfo{
-				Name:   name,
-				Server: ctx.Server,
-				Token:  config.MaskToken(ctx.Token),
-				Active: name == currentContext,
+				Name:     name,
+				Server:   ctx.Server,
+				Token:    config.MaskToken(ctx.Token),
+				Provider: ctx.Provider,
+				Active:   name == currentContext,
 			})
 		}
 

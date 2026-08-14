@@ -15,8 +15,10 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -38,6 +40,8 @@ var (
 	ErrNoContexts = errors.New("no contexts configured")
 	// ErrConfigNotLoaded is returned when config file was not loaded.
 	ErrConfigNotLoaded = errors.New("config file not loaded; using environment variables")
+	// ErrInvalidServerURL is returned when a context has an empty or invalid server URL.
+	ErrInvalidServerURL = errors.New("invalid or empty server URL")
 )
 
 // Context represents a single Meshery instance configuration.
@@ -46,6 +50,9 @@ type Context struct {
 	Server string `yaml:"server"`
 	// Token is the API token for authentication.
 	Token string `yaml:"token"`
+	// Provider is the Meshery provider name (e.g., "Meshery", "None").
+	// Required alongside token for authenticated requests.
+	Provider string `yaml:"provider,omitempty"`
 }
 
 // MultiContextConfig holds the full configuration with multiple contexts.
@@ -112,6 +119,7 @@ func (m *Manager) getConfigPath() string {
 }
 
 // loadFromFile loads configuration from a YAML file.
+// It uses strict YAML parsing to reject unknown fields (like mesheryctl's 'endpoint:').
 func (m *Manager) loadFromFile(path string) (*MultiContextConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -119,13 +127,43 @@ func (m *Manager) loadFromFile(path string) (*MultiContextConfig, error) {
 	}
 
 	var cfg MultiContextConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true) // Reject unknown fields like 'endpoint:' from mesheryctl configs
+	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Validate the active context has a valid server URL
+	if err := m.validateConfig(&cfg); err != nil {
+		return nil, err
 	}
 
 	cfg.configPath = path
 	cfg.fromFile = true
 	return &cfg, nil
+}
+
+// validateConfig validates that the configuration is usable.
+func (m *Manager) validateConfig(cfg *MultiContextConfig) error {
+	if len(cfg.Contexts) == 0 {
+		return ErrNoContexts
+	}
+
+	// Validate the active context exists and has a valid server URL
+	ctx, exists := cfg.Contexts[cfg.CurrentContext]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrContextNotFound, cfg.CurrentContext)
+	}
+
+	if ctx.Server == "" {
+		return fmt.Errorf("%w for context '%s': server is empty", ErrInvalidServerURL, cfg.CurrentContext)
+	}
+
+	if _, err := url.Parse(ctx.Server); err != nil {
+		return fmt.Errorf("%w for context '%s': %v", ErrInvalidServerURL, cfg.CurrentContext, err)
+	}
+
+	return nil
 }
 
 // createFromEnv creates a configuration from environment variables.
@@ -166,6 +204,9 @@ func (m *Manager) applyEnvOverrides(cfg *MultiContextConfig) {
 	}
 	if token := os.Getenv("MESHERY_API_TOKEN"); token != "" {
 		ctx.Token = token
+	}
+	if provider := os.Getenv("MESHERY_PROVIDER"); provider != "" {
+		ctx.Provider = provider
 	}
 
 	cfg.Contexts[cfg.CurrentContext] = ctx
@@ -282,14 +323,17 @@ func SetupPrompt() string {
      dev:
        server: http://localhost:9081
        token: <your-meshery-api-token>
+       provider: Meshery
      production:
        server: https://meshery.example.com
        token: <your-meshery-api-token>
+       provider: Meshery
 
 2. Or use environment variables for a quick setup:
 
    export MESHERY_SERVER_URL=http://localhost:9081
    export MESHERY_API_TOKEN=<your-meshery-api-token>
+   export MESHERY_PROVIDER=Meshery
 
 Currently using defaults: server=%s, token=<not set>
 `, configPath, DefaultMeshServerURL)

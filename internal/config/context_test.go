@@ -265,6 +265,137 @@ func TestSetupPrompt(t *testing.T) {
 	if !contains(prompt, "MESHERY_SERVER_URL") {
 		t.Error("SetupPrompt should mention MESHERY_SERVER_URL env var")
 	}
+
+	if !contains(prompt, "provider") {
+		t.Error("SetupPrompt should mention provider field")
+	}
+}
+
+func TestManagerRejectsMesheryctlConfig(t *testing.T) {
+	// Create a config file with mesheryctl's 'endpoint:' field instead of 'server:'
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "mcp-config.yaml")
+
+	// This is a mesheryctl-style config that should be rejected
+	configContent := `current-context: default
+contexts:
+  default:
+    endpoint: http://localhost:9081
+    token: some-token
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	t.Setenv("MESHERY_CONFIG_PATH", configPath)
+	t.Setenv("MESHERY_SERVER_URL", "")
+	t.Setenv("MESHERY_API_TOKEN", "")
+
+	mgr := NewManager()
+	err := mgr.Load()
+
+	// Should fail because of unknown field 'endpoint'
+	if err == nil {
+		t.Error("Load() should fail for mesheryctl-style config with 'endpoint:' field")
+	}
+}
+
+func TestManagerValidatesEmptyServerURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "mcp-config.yaml")
+
+	// Config with empty server URL
+	configContent := `current-context: default
+contexts:
+  default:
+    server: ""
+    token: some-token
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	t.Setenv("MESHERY_CONFIG_PATH", configPath)
+	t.Setenv("MESHERY_SERVER_URL", "")
+	t.Setenv("MESHERY_API_TOKEN", "")
+
+	mgr := NewManager()
+	err := mgr.Load()
+
+	if err == nil {
+		t.Error("Load() should fail for config with empty server URL")
+	}
+}
+
+func TestManagerLoadsProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "mcp-config.yaml")
+
+	configContent := `current-context: dev
+contexts:
+  dev:
+    server: http://localhost:9081
+    token: dev-token
+    provider: Meshery
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	t.Setenv("MESHERY_CONFIG_PATH", configPath)
+	t.Setenv("MESHERY_SERVER_URL", "")
+	t.Setenv("MESHERY_API_TOKEN", "")
+	t.Setenv("MESHERY_PROVIDER", "")
+
+	mgr := NewManager()
+	if err := mgr.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	ctx, _, err := mgr.GetCurrentContext()
+	if err != nil {
+		t.Fatalf("GetCurrentContext() error = %v", err)
+	}
+
+	if ctx.Provider != "Meshery" {
+		t.Errorf("Provider = %q, want %q", ctx.Provider, "Meshery")
+	}
+}
+
+func TestManagerProviderEnvOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "mcp-config.yaml")
+
+	configContent := `current-context: dev
+contexts:
+  dev:
+    server: http://localhost:9081
+    token: dev-token
+    provider: None
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	t.Setenv("MESHERY_CONFIG_PATH", configPath)
+	t.Setenv("MESHERY_SERVER_URL", "")
+	t.Setenv("MESHERY_API_TOKEN", "")
+	t.Setenv("MESHERY_PROVIDER", "Meshery")
+
+	mgr := NewManager()
+	if err := mgr.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	ctx, _, err := mgr.GetCurrentContext()
+	if err != nil {
+		t.Fatalf("GetCurrentContext() error = %v", err)
+	}
+
+	// MESHERY_PROVIDER env should override the config file value
+	if ctx.Provider != "Meshery" {
+		t.Errorf("Provider = %q, want %q (overridden by env)", ctx.Provider, "Meshery")
+	}
 }
 
 func contains(s, substr string) bool {
