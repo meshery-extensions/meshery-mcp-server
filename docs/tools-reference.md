@@ -40,7 +40,9 @@ Each connection contains:
 
 ### Current Development Response
 
-The current implementation returns sample development data containing a Kubernetes connection.
+The current implementation returns static sample development data containing two Kubernetes connections.
+
+This example represents development/sample data only and does not represent live production Meshery state.
 
 Example:
 

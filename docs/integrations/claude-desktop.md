@@ -32,9 +32,23 @@ Never commit real API tokens.
 
 ## Claude Desktop Support
 
-A complete, tested Claude Desktop configuration requires a verified MCP protocol request/response flow and client configuration.
+Claude Desktop integration is currently deferred.
 
-Those details are not established by the current implementation evidence reviewed for this documentation. Therefore this guide intentionally does not provide a fake command, transport, environment-variable list, or unverified JSON configuration.
+The repository provides a development stdio server through:
+
+    make run
+
+However, a tested Claude Desktop configuration, required environment-variable set, and verified Claude Desktop MCP request/response flow have not been established in the current repository implementation and CI.
+
+Therefore, this documentation does not provide an unverified Claude Desktop configuration.
+
+The Claude Desktop integration acceptance criterion remains deferred until the following are verified:
+
+1. Exact stdio server command.
+2. Exact Claude Desktop configuration.
+3. Required environment variables.
+4. Successful server startup from Claude Desktop.
+5. A verified MCP request/response or resource/tool invocation.
 
 ## Verification
 

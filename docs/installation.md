@@ -30,17 +30,35 @@ The repository provides a Makefile build target:
 
     make build
 
-This builds:
+This builds the Meshery MCP Server executable at:
 
     bin/meshery-mcp-server
 
-The equivalent Go build command used by CI is:
+The server entrypoint used by the build is:
+
+    ./cmd/meshery-mcp-server
+
+The CI workflow separately validates that the repository builds successfully with:
 
     go build ./...
 
-The server entrypoint is:
+The `go build ./...` command validates the Go packages; it is not equivalent to the `make build` target.
 
-    cmd/meshery-mcp-server/main.go
+## Verify the Built Server
+
+After running:
+
+    make build
+
+verify that the executable exists:
+
+PowerShell:
+
+    Test-Path .\bin\meshery-mcp-server.exe
+
+Linux/macOS:
+
+    test -f ./bin/meshery-mcp-server
 
 ## Run from Source
 
@@ -52,7 +70,7 @@ The Makefile builds the binary and starts it over stdio.
 
 ## Docker
 
-The repository includes a Dockerfile and a Makefile target for building a container image.
+The repository includes a Dockerfile and a Makefile target for building the container image.
 
 Build the image with:
 
@@ -62,13 +80,21 @@ The image is tagged:
 
     meshery/meshery-mcp-server
 
-The Dockerfile builds the server binary from:
+The Dockerfile builds the server from:
 
     ./cmd/meshery-mcp-server
 
-and uses `/meshery-mcp-server` as the container entrypoint.
+and uses:
 
-The repository currently documents how to build the Docker image locally. A published container registry location is not documented here because it has not been verified from the current implementation.
+    /meshery-mcp-server
+
+as the container entrypoint.
+
+A verified Docker stdio invocation is not currently established in the repository documentation or CI workflow. Therefore, Docker stdio client integration is deferred until a tested invocation and verification flow are added.
+
+For now, the supported documented Docker operation is building the image locally with:
+
+    make docker-build
 
 ## Pre-built Binaries
 
@@ -88,13 +114,13 @@ Use the source build or Docker method described above.
 
 ## Server Version
 
-The server contains version metadata that is embedded during builds.
+The build embeds the Git version and commit SHA into the server binary.
 
-The Makefile derives the Git version and commit SHA and passes them to the build using linker flags.
+The Makefile derives these values during the build.
 
-A stable end-user version command is not documented here unless it is provided by the executable in the implementation being used.
+A verified end-user `--version` command is not currently established in the repository documentation.
 
-For development builds, identify the exact source revision with:
+To identify the source revision used for a development build, run:
 
     git describe --tags --always --dirty
 

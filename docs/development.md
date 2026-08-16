@@ -111,7 +111,9 @@ The repository build-and-test workflow verifies:
 
 The workflow also runs golangci-lint.
 
-The inspected CI workflow does not currently define a separate Markdown linting or documentation-example validation command. Do not document an unconfigured command as a repository requirement.
+A README Markdown linting command is not currently configured in the repository CI workflow. Therefore, README Markdown linting as a merge acceptance requirement is deferred until a corresponding CI check is added.
+
+Do not document or claim an unconfigured Markdown linting command as a repository requirement.
 
 ## Development Workflow
 

@@ -32,9 +32,23 @@ Never commit real API tokens.
 
 ## Cursor Support
 
-A complete, tested Cursor configuration requires a verified MCP protocol request/response flow and client configuration.
+Cursor integration is currently deferred.
 
-Those details are not established by the current implementation evidence reviewed for this documentation. Therefore this guide intentionally does not provide a fake command, transport, environment-variable list, or unverified JSON configuration.
+The repository provides a development stdio server through:
+
+    make run
+
+However, a tested Cursor configuration, required environment-variable set, and verified Cursor MCP request/response flow have not been established in the current repository implementation and CI.
+
+Therefore, this documentation does not provide an unverified Cursor configuration.
+
+The Cursor integration acceptance criterion remains deferred until the following are verified:
+
+1. Exact stdio transport configuration.
+2. Exact Cursor MCP configuration.
+3. Required environment variables.
+4. Successful server startup from Cursor.
+5. A verified MCP request/response or resource/tool invocation.
 
 ## Verification
 
