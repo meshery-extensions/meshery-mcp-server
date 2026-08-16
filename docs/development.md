@@ -1,26 +1,8 @@
 # Development Guide
 
-## Repository
+> **Status:** Meshery MCP Server is currently under active development.
 
-Clone the official repository:
-
-    git clone https://github.com/meshery-extensions/meshery-mcp-server.git
-    cd meshery-mcp-server
-
-## Project Status
-
-Meshery MCP Server is currently under active development.
-
-The project is being developed incrementally, including:
-
-- MCP server functionality
-- Meshery API client functionality
-- MCP tools
-- MCP resources# Development Guide
-
-Meshery MCP Server is currently under active development.
-
-The current implementation is a Go-based development foundation with a stdio entrypoint and an initial `ping` operation.
+The current implementation is a Go-based Meshery MCP Server with a stdio entrypoint.
 
 ## Repository Setup
 
@@ -31,56 +13,105 @@ Clone the repository:
 
 ## Project Structure
 
-The current MCP foundation includes:
+The server executable is located at:
 
-    cmd/
-      server/
-        main.go
+    cmd/meshery-mcp-server/main.go
 
-    internal/
-      mcp/
-        server.go
-        server_test.go
+The repository also contains internal packages for MCP, Meshery client, resources, and version information.
 
-The `cmd/server/` directory contains the executable entrypoint.
+## Build
 
-The `internal/mcp/` directory contains the server logic and its tests.
+The repository Makefile provides the tested build target:
 
-## Run the Server
+    make build
 
-Start the current development server with:
+The binary is written to:
 
-    go run cmd/server/main.go
+    bin/meshery-mcp-server
 
-The server reads JSON input from standard input and writes JSON responses to standard output.
+The CI workflow also verifies that the repository builds with:
 
-For the current development ping operation, send:
+    go build ./...
 
-    {"method":"ping"}
+## Run
 
-Expected response:
+Run the server through the Makefile:
 
-    {"result":"pong"}
+    make run
 
-## Format the Code
+The `run` target builds the binary and starts the Meshery MCP Server over stdio.
 
-Format Go source files with:
+## Test
 
-    go fmt ./...
+Run the repository test target:
 
-## Static Analysis
+    make test
 
-Run Go's vet checks with:
+The test target runs:
+
+    go test --short ./... -race -coverprofile=coverage.txt -covermode=atomic
+
+The CI workflow uses the same test command.
+
+## Vet
+
+Run:
+
+    make vet
+
+The underlying command is:
 
     go vet ./...
 
-## Run Tests
+## Formatting
 
-Run the Go test suite with:
+Run:
 
-    go test ./...
+    make fmt
 
-The current MCP foundation includes an initial unit test for the server logic.
+The repository uses `golangci-lint fmt` for formatting.
+
+## Linting
+
+Run:
+
+    make lint
+
+The underlying command is:
+
+    golangci-lint run --timeout=10m
+
+## Docker
+
+Build the development container image with:
+
+    make docker-build
+
+The Makefile tags the image as:
+
+    meshery/meshery-mcp-server
+
+The Dockerfile builds the `cmd/meshery-mcp-server` binary and uses it as the container entrypoint.
+
+## Clean Build Artifacts
+
+Run:
+
+    make clean
+
+This removes the `bin` directory and `coverage.txt`.
+
+## CI Validation
+
+The repository build-and-test workflow verifies:
+
+    go build ./...
+    go vet ./...
+    go test --short ./... -race -coverprofile=coverage.txt -covermode=atomic
+
+The workflow also runs golangci-lint.
+
+The inspected CI workflow does not currently define a separate Markdown linting or documentation-example validation command. Do not document an unconfigured command as a repository requirement.
 
 ## Development Workflow
 
@@ -89,164 +120,31 @@ When implementing a change:
 1. Create a focused branch.
 2. Make the smallest change needed for the issue.
 3. Add or update tests.
-4. Format the Go code.
-5. Run `go vet`.
-6. Run `go test`.
-7. Update documentation when behavior changes.
-8. Review the Git diff before committing.
-9. Open a pull request that references the related issue.
+4. Run formatting.
+5. Run linting.
+6. Run `make build`.
+7. Run `make test`.
+8. Run `make vet`.
+9. Review the Git diff.
+10. Update documentation when behavior changes.
+11. Open a pull request that references the related issue.
 
-## Adding MCP Functionality
+## Current MCP Development Status
 
-The project is being expanded from the initial stdio foundation toward full MCP functionality.
+MCP functionality is under active development. Keep documentation aligned with the implementation actually present in the branch being documented.
 
-Future implementation areas include:
-
-- MCP protocol support.
-- Streamable HTTP transport.
-- MCP tools.
-- MCP resources.
-- MCP prompts.
-- Meshery API integration.
-- Tests for client and server behavior.
-
-When adding functionality, keep implementation, tests, and documentation synchronized.
-
-## Testing Stdio Behavior
-
-The current development server can be tested manually by starting:
-
-    go run cmd/server/main.go
-
-Then sending:
-
-    {"method":"ping"}
-
-Expected output:
-
-    {"result":"pong"}
-
-As the MCP protocol implementation evolves, tests should cover the actual protocol request/response path used by the executable.
-
-## Validation Before a Pull Request
-
-Run:
-
-    go fmt ./...
-    go vet ./...
-    go test ./...
-
-Also run:
-
-    git diff --check
-
-Review the output of:
-
-    git status
-    git diff
-
-before creating the pull request.
+Do not document a client integration, transport, tool, resource, or command as production-ready unless it has been implemented and verified.
 
 ## Documentation
 
-Update the relevant documentation when changing user-visible behavior:
+Update the relevant documentation when behavior changes:
 
 - [Installation](installation.md)
 - [Configuration](configuration.md)
-- [Tools Reference](tools-reference.md)
+- [Tools and Resources Reference](tools-reference.md)
 
-## Current Limitations
+## Related Documentation
 
-The current development foundation is not the completed Meshery MCP Server.
-
-In particular, the initial stdio foundation does not yet represent the final MCP feature set. Streamable HTTP transport, complete MCP protocol behavior, and the complete Meshery tool/resource/prompt surface are part of the ongoing implementation.
-
-Do not document development-only behavior as a production-ready feature.
-
-## Community
-
-Contributions should follow the repository's contribution guidelines and the CNCF Code of Conduct.
-
-See:
-
-- [Contributing Guide](../CONTRIBUTING.md)
-- [Code of Conduct](../CODE_OF_CONDUCT.md)
-
-## Prerequisites
-
-For development, install:
-
-- Git
-- Go, when building the Go implementation
-- A running Meshery instance when testing Meshery API integration
-
-See the [Meshery Quick Start](https://docs.meshery.io/installation/quick-start/) for Meshery setup information.
-
-## Building
-
-Build instructions will be updated when the Go application structure and official build target are finalized.
-
-Do not assume a build command that is not provided by the repository's current implementation.
-
-## Testing
-
-Tests should be added alongside implementation changes.
-
-Before opening a pull request:
-
-1. Run the repository's available tests.
-2. Run formatting and linting checks.
-3. Verify documentation examples.
-4. Confirm that changes do not introduce unrelated failures.
-
-The exact project test commands will be documented here once the implementation is available.
-
-## Adding an MCP Tool
-
-When the MCP tool architecture is finalized, a new tool should generally:
-
-1. Define the tool's purpose.
-2. Define its input schema.
-3. Implement the handler.
-4. Connect it to the appropriate Meshery API/client functionality.
-5. Register the tool with the MCP server.
-6. Add unit tests.
-7. Document the tool in `tools-reference.md`.
-8. Add a working example where appropriate.
-
-## Adding an MCP Resource
-
-A new MCP resource should:
-
-1. Define its URI.
-2. Define the returned data.
-3. Implement the resource handler.
-4. Register it with the server.
-5. Add tests.
-6. Document it.
-
-## Adding an MCP Prompt
-
-A new MCP prompt should:
-
-1. Define its purpose.
-2. Define its arguments.
-3. Implement the prompt.
-4. Register it with the server.
-5. Add tests.
-6. Document its usage.
-
-## Pull Requests
-
-Before opening a pull request:
-
-1. Keep the change focused.
-2. Add or update tests when applicable.
-3. Update documentation.
-4. Run available validation and linting commands.
-5. Write a clear pull request description.
-6. Reference the related GitHub issue.
-
-## Code of Conduct
-
-Contributors are expected to follow the project's [Code of Conduct](../CODE_OF_CONDUCT.md).
+- [Installation](installation.md)
+- [Configuration](configuration.md)
+- [Tools and Resources Reference](tools-reference.md)

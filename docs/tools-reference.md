@@ -6,7 +6,7 @@ This document describes the MCP resources currently present in the development i
 
 ## MCP Resources
 
-The current resource implementation exposes the following resource URIs:
+The current resource implementation exposes:
 
 | Resource URI | Purpose |
 | --- | --- |
@@ -16,9 +16,7 @@ The current resource implementation exposes the following resource URIs:
 | `meshery://health` | Returns server health information |
 | `meshery://environments` | Returns Meshery environment information |
 
-These resources are registered by the resource implementation and are read by URI.
-
-Unsupported resource URIs return an `ErrInvalidURI` error.
+Unsupported resource URIs return the implementation's `ErrInvalidURI` error.
 
 ## `meshery://connections`
 
@@ -42,7 +40,7 @@ Each connection contains:
 
 ### Current Development Response
 
-The current implementation returns sample development data containing a Kubernetes connection named `local-cluster`.
+The current implementation returns sample development data containing a Kubernetes connection.
 
 Example:
 
@@ -50,8 +48,14 @@ Example:
       "timestamp": "2026-08-16T00:00:00Z",
       "connections": [
         {
-          "id": "1",
+          "id": "conn-1",
           "name": "local-cluster",
+          "type": "kubernetes",
+          "status": "connected"
+        },
+        {
+          "id": "conn-2",
+          "name": "production-cluster",
           "type": "kubernetes",
           "status": "connected"
         }
@@ -63,25 +67,6 @@ The timestamp is generated when the resource is read.
 ## `meshery://providers`
 
 Returns Meshery provider information.
-
-### Response
-
-The response contains:
-
-- `timestamp` — time at which the resource was read.
-- `providers` — list of providers.
-
-Each provider contains:
-
-| Field | Description |
-| --- | --- |
-| `name` | Provider name |
-| `status` | Provider status |
-| `url` | Provider URL |
-
-### Current Development Response
-
-The current implementation returns sample data for the `Meshery` provider.
 
 Example:
 
@@ -101,25 +86,6 @@ The timestamp is generated when the resource is read.
 ## `meshery://adapters`
 
 Returns Meshery adapter information.
-
-### Response
-
-The response contains:
-
-- `timestamp` — time at which the resource was read.
-- `adapters` — list of adapters.
-
-Each adapter contains:
-
-| Field | Description |
-| --- | --- |
-| `name` | Adapter name |
-| `version` | Adapter version |
-| `status` | Adapter status |
-
-### Current Development Response
-
-The current implementation returns sample data for Istio and Linkerd.
 
 Example:
 
@@ -143,15 +109,7 @@ The timestamp is generated when the resource is read.
 
 ## `meshery://health`
 
-Returns health information for the development server.
-
-### Response
-
-The response contains:
-
-- `timestamp` — time at which the resource was read.
-- `status` — overall health status.
-- `components` — health status of individual components.
+Returns development server health information.
 
 Example:
 
@@ -171,24 +129,9 @@ The timestamp is generated when the resource is read.
 
 Returns Meshery environment information.
 
-### Response
+Each environment contains an environment ID, name, and connection IDs.
 
-The response contains:
-
-- `timestamp` — time at which the resource was read.
-- `environments` — list of environments.
-
-Each environment contains:
-
-| Field | Description |
-| --- | --- |
-| `id` | Environment identifier |
-| `name` | Environment name |
-| `connections` | List of connection identifiers associated with the environment |
-
-### Current Development Response
-
-The current implementation returns sample `development` and `production` environments.
+The documented connection IDs below correspond to the IDs in the `meshery://connections` example.
 
 Example:
 
@@ -224,13 +167,13 @@ Supported URIs:
 
 The resource router dispatches each supported URI to its corresponding handler.
 
-An unsupported URI returns an invalid-resource-URI error.
+An unsupported URI returns `ErrInvalidURI`.
 
 ## MCP Tools
 
 The MCP tool surface is still under active development.
 
-The resources documented above are implemented as resource handlers and should not be described as MCP tools.
+The resources documented above are resource handlers and should not be described as MCP tools.
 
 As MCP tools are implemented, this section should be expanded with:
 

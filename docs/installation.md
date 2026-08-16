@@ -2,17 +2,20 @@
 
 > **Status:** Meshery MCP Server is currently under active development.
 
-Meshery MCP Server is being developed as an official Meshery extension that provides an MCP interface for Meshery.
+This guide documents installation methods supported by the current development repository.
 
 ## Prerequisites
 
-Before running the current development server, install:
+For building from source, install:
 
 - Git
-- Go
-- A running Meshery instance when testing Meshery integration
+- Go 1.26.0 or a compatible Go release supported by the repository
 
-The current MCP server foundation is implemented as a Go application and provides a stdio entrypoint under `cmd/server/`.
+Verify Go:
+
+    go version
+
+The repository's `go.mod` declares Go 1.26.0.
 
 ## Clone the Repository
 
@@ -21,84 +24,136 @@ Clone the official repository:
     git clone https://github.com/meshery-extensions/meshery-mcp-server.git
     cd meshery-mcp-server
 
-## Run the Development Server
+## Build from Source
 
-The current development implementation can be started with:
+The repository provides a Makefile build target:
 
-    go run cmd/server/main.go
+    make build
 
-The server reads JSON input from standard input and writes JSON responses to standard output.
+This builds:
 
-## Test the Ping Tool
+    bin/meshery-mcp-server
 
-The current development foundation includes a simple `ping` operation.
+The equivalent Go build command used by CI is:
 
-Start the server:
+    go build ./...
 
-    go run cmd/server/main.go
+The server entrypoint is:
 
-Then provide:
+    cmd/meshery-mcp-server/main.go
 
-    {"method":"ping"}
+## Run from Source
 
-The expected response from the current foundation is:
+Run the development server with:
 
-    {"result":"pong"}
+    make run
 
-This is a development bootstrap and is not yet a complete MCP client integration.
+The Makefile builds the binary and starts it over stdio.
 
-## Current Transport
+## Docker
 
-The current foundation implements communication over standard input and standard output (stdio).
+The repository includes a Dockerfile and a Makefile target for building a container image.
 
-Streamable HTTP transport is planned as future work.
+Build the image with:
 
-## Current Development Status
+    make docker-build
 
-The current implementation is a minimal foundation. It includes:
+The image is tagged:
 
-- A Go module.
-- A `cmd/server/` entrypoint.
-- Internal MCP server logic.
-- Stdio input/output handling.
-- A basic `ping` operation.
-- Initial unit tests.
+    meshery/meshery-mcp-server
 
-Full MCP protocol support, additional tools, resources, prompts, and production-ready client integrations are still under development.
+The Dockerfile builds the server binary from:
+
+    ./cmd/meshery-mcp-server
+
+and uses `/meshery-mcp-server` as the container entrypoint.
+
+The repository currently documents how to build the Docker image locally. A published container registry location is not documented here because it has not been verified from the current implementation.
+
+## Pre-built Binaries
+
+The repository contains release/build configuration, but this guide does not claim a public pre-built binary download URL because a verified release artifact location was not established from the implementation reviewed for this documentation.
+
+For a guaranteed reproducible local installation, build from source with:
+
+    make build
+
+## Homebrew
+
+A Homebrew formula was not identified in the reviewed Meshery MCP Server implementation.
+
+Therefore, Homebrew installation is currently **not documented as a supported installation method**.
+
+Use the source build or Docker method described above.
+
+## Server Version
+
+The server contains version metadata that is embedded during builds.
+
+The Makefile derives the Git version and commit SHA and passes them to the build using linker flags.
+
+A stable end-user version command is not documented here unless it is provided by the executable in the implementation being used.
+
+For development builds, identify the exact source revision with:
+
+    git describe --tags --always --dirty
+
+and:
+
+    git rev-parse --short HEAD
 
 ## Configuration
 
 Meshery connection and authentication settings are documented in the [Configuration Guide](configuration.md).
 
+## Verify the Installation
+
+Build and validate the server:
+
+    make build
+    make test
+    make vet
+
+Then run:
+
+    make run
+
+For Docker:
+
+    make docker-build
+
 ## Troubleshooting
 
-### Go command is not available
+### Go is not installed
 
-Verify that Go is installed:
+Install Go and verify:
 
     go version
 
-### Server does not start
+### Build fails
 
-Run the command from the repository root:
+Run from the repository root and verify dependencies:
 
-    go run cmd/server/main.go
+    go mod download
 
-### Ping does not return the expected response
+Then:
 
-Make sure the input is valid JSON and uses the current development request format:
+    make build
 
-    {"method":"ping"}
+### Tests fail
 
-### MCP client cannot connect
+Run:
 
-The current development foundation uses stdio and is not yet a finalized MCP client integration. Verify that the client configuration matches the server transport and implementation available in your checkout.
+    make test
 
-## Next Steps
+### Linting fails
 
-After running the development server:
+Run:
 
-1. Review the [Configuration Guide](configuration.md).
-2. Review the [Tools Reference](tools-reference.md).
-3. Review the [Development Guide](development.md).
-4. Follow the project's ongoing implementation work for complete MCP support.
+    make lint
+
+## Related Documentation
+
+- [Configuration](configuration.md)
+- [Tools and Resources Reference](tools-reference.md)
+- [Development Guide](development.md)
