@@ -1,78 +1,263 @@
-# MCP Tools Reference
+# MCP Resources and Tools Reference
 
-> **Status:** The MCP tool set is currently under active development.
+> **Status:** Meshery MCP Server is currently under active development.
 
-This document is the reference for tools exposed by Meshery MCP Server.
+This document describes the MCP resources currently present in the development implementation.
 
-Tool names, inputs, outputs, and examples must be kept synchronized with the server implementation.
+## MCP Resources
 
-## Tool Documentation Format
+The current resource implementation exposes the following resource URIs:
 
-Each tool should document:
+| Resource URI | Purpose |
+| --- | --- |
+| `meshery://connections` | Returns Meshery connection information |
+| `meshery://providers` | Returns Meshery provider information |
+| `meshery://adapters` | Returns Meshery adapter information |
+| `meshery://health` | Returns server health information |
+| `meshery://environments` | Returns Meshery environment information |
+
+These resources are registered by the resource implementation and are read by URI.
+
+Unsupported resource URIs return an `ErrInvalidURI` error.
+
+## `meshery://connections`
+
+Returns connection information.
+
+### Response
+
+The response contains:
+
+- `timestamp` — time at which the resource was read.
+- `connections` — list of connections.
+
+Each connection contains:
 
 | Field | Description |
 | --- | --- |
-| Tool | MCP tool name |
-| Purpose | What the tool does |
-| Inputs | Required and optional arguments |
-| Output | Returned data |
-| Errors | Expected error conditions |
-| Example | Working usage example |
+| `id` | Connection identifier |
+| `name` | Connection name |
+| `type` | Connection type |
+| `status` | Connection status |
 
-## Planned Tool Areas
+### Current Development Response
 
-The project is expected to expose Meshery capabilities through MCP tools in areas including:
+The current implementation returns sample development data containing a Kubernetes connection named `local-cluster`.
 
-- Designs
-- Connections
-- Environments
-- Workspaces
-- Models
-- Performance capabilities
+Example:
 
-The exact registered tool names and schemas will be added here after they are implemented and tested.
+    {
+      "timestamp": "2026-08-16T00:00:00Z",
+      "connections": [
+        {
+          "id": "1",
+          "name": "local-cluster",
+          "type": "kubernetes",
+          "status": "connected"
+        }
+      ]
+    }
 
-## Designs
+The timestamp is generated when the resource is read.
 
-Design-related tools will allow MCP clients to work with Meshery designs/patterns.
+## `meshery://providers`
 
-The final documentation should include:
+Returns Meshery provider information.
+
+### Response
+
+The response contains:
+
+- `timestamp` — time at which the resource was read.
+- `providers` — list of providers.
+
+Each provider contains:
+
+| Field | Description |
+| --- | --- |
+| `name` | Provider name |
+| `status` | Provider status |
+| `url` | Provider URL |
+
+### Current Development Response
+
+The current implementation returns sample data for the `Meshery` provider.
+
+Example:
+
+    {
+      "timestamp": "2026-08-16T00:00:00Z",
+      "providers": [
+        {
+          "name": "Meshery",
+          "status": "active",
+          "url": "http://localhost"
+        }
+      ]
+    }
+
+The timestamp is generated when the resource is read.
+
+## `meshery://adapters`
+
+Returns Meshery adapter information.
+
+### Response
+
+The response contains:
+
+- `timestamp` — time at which the resource was read.
+- `adapters` — list of adapters.
+
+Each adapter contains:
+
+| Field | Description |
+| --- | --- |
+| `name` | Adapter name |
+| `version` | Adapter version |
+| `status` | Adapter status |
+
+### Current Development Response
+
+The current implementation returns sample data for Istio and Linkerd.
+
+Example:
+
+    {
+      "timestamp": "2026-08-16T00:00:00Z",
+      "adapters": [
+        {
+          "name": "Istio",
+          "version": "1.18",
+          "status": "running"
+        },
+        {
+          "name": "Linkerd",
+          "version": "2.13",
+          "status": "stopped"
+        }
+      ]
+    }
+
+The timestamp is generated when the resource is read.
+
+## `meshery://health`
+
+Returns health information for the development server.
+
+### Response
+
+The response contains:
+
+- `timestamp` — time at which the resource was read.
+- `status` — overall health status.
+- `components` — health status of individual components.
+
+Example:
+
+    {
+      "timestamp": "2026-08-16T00:00:00Z",
+      "status": "healthy",
+      "components": {
+        "server": "ok",
+        "database": "ok",
+        "adapters": "ok"
+      }
+    }
+
+The timestamp is generated when the resource is read.
+
+## `meshery://environments`
+
+Returns Meshery environment information.
+
+### Response
+
+The response contains:
+
+- `timestamp` — time at which the resource was read.
+- `environments` — list of environments.
+
+Each environment contains:
+
+| Field | Description |
+| --- | --- |
+| `id` | Environment identifier |
+| `name` | Environment name |
+| `connections` | List of connection identifiers associated with the environment |
+
+### Current Development Response
+
+The current implementation returns sample `development` and `production` environments.
+
+Example:
+
+    {
+      "timestamp": "2026-08-16T00:00:00Z",
+      "environments": [
+        {
+          "id": "env-1",
+          "name": "development",
+          "connections": ["conn-1"]
+        },
+        {
+          "id": "env-2",
+          "name": "production",
+          "connections": ["conn-2"]
+        }
+      ]
+    }
+
+The timestamp is generated when the resource is read.
+
+## Reading Resources
+
+Resources are selected using their URI.
+
+Supported URIs:
+
+    meshery://connections
+    meshery://providers
+    meshery://adapters
+    meshery://health
+    meshery://environments
+
+The resource router dispatches each supported URI to its corresponding handler.
+
+An unsupported URI returns an invalid-resource-URI error.
+
+## MCP Tools
+
+The MCP tool surface is still under active development.
+
+The resources documented above are implemented as resource handlers and should not be described as MCP tools.
+
+As MCP tools are implemented, this section should be expanded with:
 
 - Tool name
-- Input parameters
-- Pagination behavior
-- Returned design fields
+- Purpose
+- Input schema
+- Output schema
 - Error behavior
-- Working example
+- Examples
+- Corresponding tests
 
-## Connections
+## Current Limitations
 
-Connection-related tools will document how an MCP client can inspect or manage Meshery connections when the corresponding tools are implemented.
+The resource handlers in the current development implementation return sample/static data.
 
-## Environments
+They should therefore be treated as development functionality rather than a complete representation of live Meshery state.
 
-Environment-related tools will document the available environment operations after implementation.
-
-## Workspaces
-
-Workspace-related tools will document the available workspace operations after implementation.
-
-## Models
-
-Model-related tools will document access to the Meshery model/component registry after implementation.
-
-## Performance
-
-Performance-related tools will document supported performance-test operations after implementation.
+As the implementation evolves to retrieve live data through the Meshery API client, this documentation should be updated to describe the actual API-backed behavior.
 
 ## Keeping This Reference Up to Date
 
-Whenever an MCP tool is added or changed:
+When a resource or tool changes:
 
 1. Update this document.
-2. Document every input.
-3. Document the output.
-4. Document expected errors.
-5. Add a working example.
-6. Verify the example against the implementation.
-7. Add or update the corresponding tests.
+2. Document the exact URI or tool name.
+3. Document request/input fields.
+4. Document response/output fields.
+5. Document errors.
+6. Add a working example where applicable.
+7. Keep the documentation synchronized with tests and implementation.

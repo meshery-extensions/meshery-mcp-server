@@ -2,86 +2,103 @@
 
 > **Status:** Meshery MCP Server is currently under active development.
 
-Meshery MCP Server is an official Meshery extension that provides an MCP interface for interacting with Meshery from MCP-compatible clients.
+Meshery MCP Server is being developed as an official Meshery extension that provides an MCP interface for Meshery.
 
 ## Prerequisites
 
-Before working with Meshery MCP Server, you should have:
+Before running the current development server, install:
 
-- A running Meshery instance.
-- An MCP-compatible client.
-- Git installed.
-- Go installed if you plan to build the server from source.
+- Git
+- Go
+- A running Meshery instance when testing Meshery integration
 
-For information about installing Meshery, see the [Meshery Quick Start](https://docs.meshery.io/installation/quick-start/).
+The current MCP server foundation is implemented as a Go application and provides a stdio entrypoint under `cmd/server/`.
 
 ## Clone the Repository
 
-Clone the official Meshery MCP Server repository:
+Clone the official repository:
 
     git clone https://github.com/meshery-extensions/meshery-mcp-server.git
     cd meshery-mcp-server
 
-## Build from Source
+## Run the Development Server
 
-The Meshery MCP Server is currently under active development.
+The current development implementation can be started with:
 
-The repository does not yet provide a finalized Go module, build target, or release binary. Therefore, the exact build and run commands will be documented here once the implementation is available.
+    go run cmd/server/main.go
 
-The expected source-build workflow is:
+The server reads JSON input from standard input and writes JSON responses to standard output.
 
-    git clone https://github.com/meshery-extensions/meshery-mcp-server.git
-    cd meshery-mcp-server
+## Test the Ping Tool
 
-    # Build and run commands will be added
-    # when the server implementation is finalized.
+The current development foundation includes a simple `ping` operation.
 
-## Pre-built Binaries
+Start the server:
 
-Official pre-built binaries will be documented here when Meshery MCP Server releases are published.
+    go run cmd/server/main.go
 
-The release documentation will include:
+Then provide:
 
-- Supported operating systems.
-- Supported CPU architectures.
-- Download locations.
-- Installation instructions.
-- Version verification.
+    {"method":"ping"}
 
-## Docker
+The expected response from the current foundation is:
 
-Docker installation will be documented once an official Meshery MCP Server container image is published.
+    {"result":"pong"}
 
-The documentation will include:
+This is a development bootstrap and is not yet a complete MCP client integration.
 
-- Official container image name.
-- Available image tags.
-- Required environment variables.
-- Port configuration.
-- Example Docker commands.
+## Current Transport
 
-## Homebrew
+The current foundation implements communication over standard input and standard output (stdio).
 
-Homebrew installation instructions will be added when an official Homebrew distribution becomes available.
+Streamable HTTP transport is planned as future work.
 
-## Verify the Installation
+## Current Development Status
 
-Once the server implementation and command-line interface are finalized, this section will document how to verify the installation.
+The current implementation is a minimal foundation. It includes:
 
-Verification should confirm that:
+- A Go module.
+- A `cmd/server/` entrypoint.
+- Internal MCP server logic.
+- Stdio input/output handling.
+- A basic `ping` operation.
+- Initial unit tests.
 
-1. Meshery MCP Server starts successfully.
-2. The server can communicate with Meshery.
-3. An MCP-compatible client can connect to the server.
-4. MCP tools and resources can be discovered.
+Full MCP protocol support, additional tools, resources, prompts, and production-ready client integrations are still under development.
+
+## Configuration
+
+Meshery connection and authentication settings are documented in the [Configuration Guide](configuration.md).
+
+## Troubleshooting
+
+### Go command is not available
+
+Verify that Go is installed:
+
+    go version
+
+### Server does not start
+
+Run the command from the repository root:
+
+    go run cmd/server/main.go
+
+### Ping does not return the expected response
+
+Make sure the input is valid JSON and uses the current development request format:
+
+    {"method":"ping"}
+
+### MCP client cannot connect
+
+The current development foundation uses stdio and is not yet a finalized MCP client integration. Verify that the client configuration matches the server transport and implementation available in your checkout.
 
 ## Next Steps
 
-After installing Meshery MCP Server:
+After running the development server:
 
-1. Configure the Meshery server URL.
-2. Configure authentication if required.
-3. Configure your MCP-compatible client.
-4. Start the MCP server.
-5. Verify the connection.
-6. Use the available MCP tools and resources.
+1. Review the [Configuration Guide](configuration.md).
+2. Review the [Tools Reference](tools-reference.md).
+3. Review the [Development Guide](development.md).
+4. Follow the project's ongoing implementation work for complete MCP support.

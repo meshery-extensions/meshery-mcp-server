@@ -2,53 +2,76 @@
 
 > **Status:** Meshery MCP Server is currently under active development.
 
-This guide will document how to connect Meshery MCP Server to VS Code and GitHub Copilot after the supported MCP configuration is finalized.
+The current Meshery MCP Server implementation provides a development stdio foundation. A complete, verified VS Code / GitHub Copilot integration is not yet documented because the final MCP protocol support and client configuration are still under development.
+
+## Current Status
+
+The current development server can be started with:
+
+    go run cmd/server/main.go
+
+The current foundation reads JSON from standard input and writes JSON to standard output.
+
+The current development ping request is:
+
+    {"method":"ping"}
+
+Expected response:
+
+    {"result":"pong"}
+
+This development interface should not be treated as the final VS Code / GitHub Copilot MCP integration.
 
 ## Prerequisites
 
-- A recent VS Code installation with the required MCP/Copilot functionality.
-- GitHub Copilot access where required.
-- A running Meshery instance.
-- A working Meshery MCP Server installation.
+- VS Code
+- GitHub Copilot access where required
+- A working Go development environment
+- A running Meshery instance when testing Meshery integration
+- A local checkout of Meshery MCP Server
 
-## MCP Configuration
+See the [Installation Guide](../installation.md).
 
-The final configuration format depends on the MCP support provided by the VS Code version in use.
+## Configuration
 
-The repository will document the verified configuration once the Meshery MCP Server command and transport are finalized.
+Meshery connection and authentication settings are documented in the [Configuration Guide](../configuration.md).
 
-Expected configuration concept:
+Never commit real credentials.
 
-    {
-      "servers": {
-        "meshery": {
-          "command": "<meshery-mcp-server-command>",
-          "args": []
-        }
-      }
-    }
+## VS Code / GitHub Copilot Integration
 
-Do not copy this placeholder configuration into a production setup until it has been verified against the implementation.
+A verified VS Code / GitHub Copilot configuration will be documented after the server's MCP protocol support and supported transport are finalized.
 
-## Meshery Configuration
+At the current development stage, this repository does not provide a production-ready VS Code / GitHub Copilot configuration command or configuration snippet.
 
-Configure the Meshery server connection according to the [Configuration Guide](../configuration.md).
+Do not use an unverified placeholder configuration as a production setup.
 
-## Verify the Connection
+## Verification
 
-After configuring the MCP server:
+When VS Code / GitHub Copilot support is finalized, this guide should document:
 
-1. Restart or reload VS Code if required.
-2. Open the MCP/Copilot tools interface.
-3. Confirm that Meshery MCP Server is available.
-4. Invoke an available Meshery tool.
+1. The exact server command.
+2. The supported MCP transport.
+3. The required VS Code configuration.
+4. Required environment variables.
+5. A verified tool or resource invocation.
+6. Expected output.
 
 ## Troubleshooting
 
-If the server is unavailable:
+For the current development foundation:
 
-- Check the configured command.
-- Check the server logs.
-- Verify the Meshery URL.
-- Verify authentication settings.
-- Confirm the MCP configuration format supported by your VS Code version.
+- Verify that Go is installed with `go version`.
+- Run the server from the repository root.
+- Verify that `go run cmd/server/main.go` starts successfully.
+- Verify the development ping request and response.
+- Check server output for errors.
+
+For VS Code / GitHub Copilot-specific connection problems, use the final verified client configuration once MCP support is completed.
+
+## Related Documentation
+
+- [Installation](../installation.md)
+- [Configuration](../configuration.md)
+- [Tools and Resources Reference](../tools-reference.md)
+- [Development Guide](../development.md)

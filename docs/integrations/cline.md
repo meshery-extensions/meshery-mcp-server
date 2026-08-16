@@ -2,54 +2,73 @@
 
 > **Status:** Meshery MCP Server is currently under active development.
 
-This guide will document how to connect Cline to Meshery MCP Server once the server command, transport, and Cline configuration have been finalized and tested.
+The current Meshery MCP Server implementation provides a development stdio foundation. A complete, verified Cline integration is not yet documented because the final MCP protocol support and client configuration are still under development.
+
+## Current Status
+
+The current development server can be started with:
+
+    go run cmd/server/main.go
+
+The current foundation reads JSON from standard input and writes JSON to standard output.
+
+The current development ping request is:
+
+    {"method":"ping"}
+
+Expected response:
+
+    {"result":"pong"}
+
+This development interface should not be treated as the final Cline MCP integration.
 
 ## Prerequisites
 
-- VS Code with Cline installed.
-- A running Meshery instance.
-- A working Meshery MCP Server installation.
+- VS Code with Cline installed
+- A working Go development environment
+- A running Meshery instance when testing Meshery integration
+- A local checkout of Meshery MCP Server
 
-## MCP Configuration
+See the [Installation Guide](../installation.md).
 
-Cline supports connecting external MCP servers through its MCP configuration.
+## Configuration
 
-The final Meshery MCP Server configuration will be added here after the implementation is finalized.
-
-Expected configuration concept:
-
-    {
-      "mcpServers": {
-        "meshery": {
-          "command": "<meshery-mcp-server-command>",
-          "args": []
-        }
-      }
-    }
-
-Replace the placeholder command with the actual Meshery MCP Server command.
-
-## Meshery Configuration
-
-Configure the Meshery connection according to the [Configuration Guide](../configuration.md).
+Meshery connection and authentication settings are documented in the [Configuration Guide](../configuration.md).
 
 Never commit real credentials.
 
-## Verify the Connection
+## Cline Integration
 
-After configuring Cline:
+A verified Cline configuration will be documented after the server's MCP protocol support and supported transport are finalized.
 
-1. Restart or reload the client if required.
-2. Open the MCP server/tool interface.
-3. Confirm that Meshery MCP Server is available.
-4. Test an available Meshery MCP tool.
+At the current development stage, this repository does not provide a production-ready Cline configuration command or configuration snippet.
+
+Do not use an unverified placeholder configuration as a production setup.
+
+## Verification
+
+When Cline support is finalized, this guide should document:
+
+1. The exact server command.
+2. The supported MCP transport.
+3. The required Cline configuration.
+4. Required environment variables.
+5. A verified tool or resource invocation.
+6. Expected output.
 
 ## Troubleshooting
 
-If Cline cannot connect:
+For the current development foundation:
 
-- Verify the configured command.
-- Check the Meshery server URL.
-- Verify authentication.
-- Check the MCP server logs.
-- Confirm that the configuration format matches your installed Cline version.
+- Verify that Go is installed with `go version`.
+- Run the server from the repository root.
+- Verify that `go run cmd/server/main.go` starts successfully.
+- Verify the development ping request and response.
+- Check server output for errors.
+
+## Related Documentation
+
+- [Installation](../installation.md)
+- [Configuration](../configuration.md)
+- [Tools and Resources Reference](../tools-reference.md)
+- [Development Guide](../development.md)

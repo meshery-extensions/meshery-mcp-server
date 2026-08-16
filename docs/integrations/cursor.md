@@ -2,54 +2,73 @@
 
 > **Status:** Meshery MCP Server is currently under active development.
 
-This guide will document how to connect Cursor to Meshery MCP Server once the server command, transport, and supported Cursor configuration have been finalized and tested.
+The current Meshery MCP Server implementation provides a development stdio foundation. A complete, verified Cursor integration is not yet documented because the final MCP protocol support and client configuration are still under development.
+
+## Current Status
+
+The current development server can be started with:
+
+    go run cmd/server/main.go
+
+The current foundation reads JSON from standard input and writes JSON to standard output.
+
+The current development ping request is:
+
+    {"method":"ping"}
+
+Expected response:
+
+    {"result":"pong"}
+
+This development interface should not be treated as the final Cursor MCP integration.
 
 ## Prerequisites
 
 - Cursor
-- A running Meshery instance
-- A working Meshery MCP Server installation
+- A working Go development environment
+- A running Meshery instance when testing Meshery integration
+- A local checkout of Meshery MCP Server
 
-## MCP Configuration
+See the [Installation Guide](../installation.md).
 
-Cursor provides MCP server configuration for connecting external MCP servers.
+## Configuration
 
-The final Meshery configuration will be documented here after the implementation is finalized.
-
-Expected configuration concept:
-
-    {
-      "mcpServers": {
-        "meshery": {
-          "command": "<meshery-mcp-server-command>",
-          "args": []
-        }
-      }
-    }
-
-Replace the placeholder command with the actual Meshery MCP Server command.
-
-## Meshery Configuration
-
-Configure the Meshery connection according to the [Configuration Guide](../configuration.md).
+Meshery connection and authentication settings are documented in the [Configuration Guide](../configuration.md).
 
 Never commit real credentials.
 
-## Verify the Connection
+## Cursor Integration
 
-After adding the server:
+A verified Cursor configuration will be documented after the server's MCP protocol support and supported transport are finalized.
 
-1. Restart Cursor if required.
-2. Open the MCP tools interface.
-3. Confirm that Meshery MCP Server is available.
-4. Test an available Meshery MCP tool.
+At the current development stage, this repository does not provide a production-ready Cursor configuration command or configuration snippet.
+
+Do not use an unverified placeholder configuration as a production setup.
+
+## Verification
+
+When Cursor support is finalized, this guide should document:
+
+1. The exact server command.
+2. The supported MCP transport.
+3. The required Cursor configuration.
+4. Required environment variables.
+5. A verified tool or resource invocation.
+6. Expected output.
 
 ## Troubleshooting
 
-If the connection fails:
+For the current development foundation:
 
-- Verify the server command.
-- Verify the Meshery server URL.
-- Verify authentication.
-- Check the MCP server logs.
-- Confirm the configuration format supported by your Cursor version.
+- Verify that Go is installed with `go version`.
+- Run the server from the repository root.
+- Verify that `go run cmd/server/main.go` starts successfully.
+- Verify the development ping request and response.
+- Check server output for errors.
+
+## Related Documentation
+
+- [Installation](../installation.md)
+- [Configuration](../configuration.md)
+- [Tools and Resources Reference](../tools-reference.md)
+- [Development Guide](../development.md)

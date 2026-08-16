@@ -2,58 +2,75 @@
 
 > **Status:** Meshery MCP Server is currently under active development.
 
-This guide will document how to connect Claude Desktop to Meshery MCP Server once the server implementation and supported transport are finalized.
+The current Meshery MCP Server implementation provides a development stdio foundation. A complete, verified Claude Desktop integration is not yet documented because the final MCP protocol support and client configuration are still under development.
+
+## Current Status
+
+The current development server can be started with:
+
+    go run cmd/server/main.go
+
+The current foundation reads JSON from standard input and writes JSON to standard output.
+
+The current development ping request is:
+
+    {"method":"ping"}
+
+Expected response:
+
+    {"result":"pong"}
+
+This development interface should not be treated as the final Claude Desktop MCP integration.
 
 ## Prerequisites
 
 - Claude Desktop
-- A running Meshery instance
-- A working Meshery MCP Server installation
+- A working Go development environment
+- A running Meshery instance when testing Meshery integration
+- A local checkout of Meshery MCP Server
 
-See the [Installation Guide](../installation.md) for project setup.
-
-## MCP Server Configuration
-
-Claude Desktop uses an MCP server configuration to start or connect to MCP servers.
-
-The final Meshery MCP Server configuration will be documented here after the supported command and transport are finalized.
-
-Expected structure:
-
-    {
-      "mcpServers": {
-        "meshery": {
-          "command": "<meshery-mcp-server-command>",
-          "args": []
-        }
-      }
-    }
-
-Replace the placeholder command with the actual published Meshery MCP Server command.
+See the [Installation Guide](../installation.md).
 
 ## Configuration
 
-Meshery connection settings should be configured according to the [Configuration Guide](../configuration.md).
+Meshery connection and authentication settings are documented in the [Configuration Guide](../configuration.md).
 
-Do not place real API tokens in documentation or source control.
+Do not place real API tokens or other credentials in source control.
 
-## Verify the Connection
+## Claude Desktop Integration
 
-After configuring the client:
+A verified Claude Desktop configuration will be documented after the server's MCP protocol support and supported transport are finalized.
 
-1. Restart Claude Desktop.
-2. Open the MCP/tools interface.
-3. Confirm that the Meshery server is available.
-4. Test an available Meshery MCP tool.
+At the current development stage, this repository does not provide a production-ready Claude Desktop configuration command or configuration snippet.
+
+Do not use an unverified placeholder configuration as a production setup.
+
+## Verification
+
+When Claude Desktop support is finalized, this guide should document:
+
+1. The exact server command.
+2. The supported MCP transport.
+3. The required client configuration.
+4. Required environment variables.
+5. A verified tool or resource invocation.
+6. Expected output.
 
 ## Troubleshooting
 
-If the server cannot be discovered:
+For the current development foundation:
 
-- Confirm the executable path.
-- Confirm the Meshery server is reachable.
-- Check the configured environment variables.
-- Check the server logs.
-- Verify that the MCP transport configured by the client matches the server implementation.
+- Verify that Go is installed with `go version`.
+- Run the server from the repository root.
+- Verify that `go run cmd/server/main.go` starts successfully.
+- Verify the development ping request and response.
+- Check server output for errors.
 
-The final troubleshooting commands will be added after the implementation is finalized.
+For Claude Desktop-specific connection problems, use the final verified client configuration once MCP support is completed.
+
+## Related Documentation
+
+- [Installation](../installation.md)
+- [Configuration](../configuration.md)
+- [Tools and Resources Reference](../tools-reference.md)
+- [Development Guide](../development.md)

@@ -1,7 +1,7 @@
 # Meshery MCP Server
 
-<div align="center">
-    <img src="https://raw.githubusercontent.com/meshery-extensions/.github/master/profile/assets/img/meshery-extensions-github.png" alt="Meshery Extensions" />
+<div>
+    <img src="https://raw.githubusercontent.com/meshery-extensions/.github/master/profile/assets/img/meshery-extensions-github.png" alt="Meshery MCP Server" />
 </div>
 
 Meshery MCP Server is an official Meshery extension that provides an interface between MCP-compatible AI clients and Meshery.
@@ -10,11 +10,11 @@ The project aims to make Meshery capabilities accessible through the Model Conte
 
 ## Overview
 
-[Meshery](https://meshery.io/) is a cloud-native engineering platform for collaboratively designing and operating cloud and cloud-native infrastructure.
+[Meshery](https://meshery.io/) is a cloud-native management platform for designing and managing Kubernetes and cloud-native infrastructure.
 
 The Meshery MCP Server extends Meshery with an MCP interface. MCP-compatible clients can communicate with the server using standardized MCP interactions.
 
-This project is being developed in Go and is intended to support MCP-compatible AI clients.
+This project is being developed in Go and is intended to support AI clients such as Claude Desktop, Cursor, VS Code, and other MCP-compatible applications.
 
 ## Architecture
 
@@ -58,23 +58,32 @@ The project is being developed to provide:
 - Integration with MCP-compatible AI clients.
 - Documentation and examples for users and contributors.
 
-> **Note:** The server is currently under development. Installation commands, configuration options, tools, and client integration examples will be documented as the corresponding functionality becomes available.
+> **Note:** The documentation currently available in this repository covers installation, configuration, development, tools, and MCP client integrations. Some advanced MCP capabilities remain under active development and will be documented as they become available.
 
 ## Documentation
 
-Project-specific documentation will be maintained in this repository as the MCP server implementation develops.
+- [Installation](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [Tools Reference](docs/tools-reference.md)
+- [Development Guide](docs/development.md)
 
-For Meshery documentation, see:
+### AI Client Integrations
 
-- [Meshery Documentation](https://docs.meshery.io/)
-- [Meshery Quick Start](https://docs.meshery.io/installation/quick-start/)
-- [Meshery Extensions](https://docs.meshery.io/extensions/)
-- [Meshery REST API Reference](https://docs.meshery.io/reference/rest-apis/)
+- [Claude Desktop](docs/integrations/claude-desktop.md)
+- [VS Code / GitHub Copilot](docs/integrations/vscode-copilot.md)
+- [Cursor](docs/integrations/cursor.md)
+- [Cline](docs/integrations/cline.md)
+
+### Planned Features
+
+The complete MCP tool, resource, prompt, and transport surface is still under development. Documentation for features that are not yet implemented will be added as the corresponding functionality becomes available.
 
 ## Meshery Resources
 
 - [Meshery](https://meshery.io/)
-- [Meshery GitHub Repository](https://github.com/meshery/meshery)
+- [Meshery Documentation](https://docs.meshery.io/)
+- [Meshery GitHub](https://github.com/meshery/meshery)
+- [Meshery Extensions](https://meshery.io/extensions)
 
 ## Community and Contributing
 
@@ -82,11 +91,13 @@ Contributions to the Meshery MCP Server are welcome.
 
 Before contributing, please review:
 
-- [Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md)
+- [Contributing Guide](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security Policy](SECURITY.md)
 
 Join the Meshery community:
 
-- [Community Slack](https://slack.meshery.io/)
+- [Slack](https://slack.meshery.io/)
 - [Community Forum](https://discuss.meshery.io/)
 - [Community Calendar](https://meshery.io/calendar)
 
