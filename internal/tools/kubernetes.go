@@ -15,11 +15,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -52,6 +55,14 @@ type K8sContext struct {
 type MesheryK8sContextPage struct {
 	TotalCount int          `json:"totalCount"`
 	Contexts   []K8sContext `json:"contexts"`
+}
+
+// SaveK8sContextResponse represents the response when registering/connecting kubeconfig in Meshery.
+type SaveK8sContextResponse struct {
+	RegisteredContexts []K8sContext `json:"registeredContexts"`
+	ConnectedContexts  []K8sContext `json:"connectedContexts"`
+	IgnoredContexts    []K8sContext `json:"ignoredContexts"`
+	ErroredContexts    []K8sContext `json:"erroredContexts"`
 }
 
 // MeshSyncResource represents an individual Kubernetes resource discovered by MeshSync.
@@ -123,6 +134,8 @@ type KubernetesClient interface {
 	GetK8sContexts(ctx context.Context, page, pageSize int, search string) (*MesheryK8sContextPage, error)
 	GetMeshSyncResources(ctx context.Context, kubernetesServerID string, kind string, namespace string, page, pageSize int) (*MeshSyncResourcesResponse, error)
 	Ping(ctx context.Context) error
+	AddK8sConfig(ctx context.Context, kubeconfigBytes []byte, contextName string) (*SaveK8sContextResponse, error)
+	DeleteK8sContext(ctx context.Context, contextID string) error
 }
 
 // MesheryHTTPClient implements KubernetesClient by calling Meshery Server's REST endpoints.
@@ -147,6 +160,14 @@ func (e *errClient) GetMeshSyncResources(ctx context.Context, kubernetesServerID
 }
 
 func (e *errClient) Ping(ctx context.Context) error {
+	return e.err
+}
+
+func (e *errClient) AddK8sConfig(ctx context.Context, kubeconfigBytes []byte, contextName string) (*SaveK8sContextResponse, error) {
+	return nil, e.err
+}
+
+func (e *errClient) DeleteK8sContext(ctx context.Context, contextID string) error {
 	return e.err
 }
 
@@ -415,6 +436,86 @@ func (c *MesheryHTTPClient) Ping(ctx context.Context) error {
 	return nil
 }
 
+// AddK8sConfig registers a cluster in Meshery by uploading kubeconfig bytes via POST /api/system/kubernetes.
+func (c *MesheryHTTPClient) AddK8sConfig(ctx context.Context, kubeconfigBytes []byte, contextName string) (*SaveK8sContextResponse, error) {
+	endpoint := c.baseURL + "/api/system/kubernetes"
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	part, err := writer.CreateFormFile("k8sfile", "config")
+	if err != nil {
+		return nil, fmt.Errorf("create form file for kubeconfig: %w", err)
+	}
+	if _, err := part.Write(kubeconfigBytes); err != nil {
+		return nil, fmt.Errorf("write kubeconfig content: %w", err)
+	}
+
+	if contextName != "" {
+		if err := writer.WriteField("contextName", contextName); err != nil {
+			return nil, fmt.Errorf("write contextName field: %w", err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return nil, fmt.Errorf("create add k8s config request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.applyAuthHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("post kubeconfig to meshery: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("meshery POST /api/system/kubernetes returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var saveResp SaveK8sContextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&saveResp); err != nil {
+		return nil, fmt.Errorf("decode save k8s context response: %w", err)
+	}
+
+	return &saveResp, nil
+}
+
+// DeleteK8sContext deletes a Kubernetes context connection via DELETE /api/system/kubernetes/contexts/{id}.
+func (c *MesheryHTTPClient) DeleteK8sContext(ctx context.Context, contextID string) error {
+	if contextID == "" {
+		return errors.New("contextID is required for context deletion")
+	}
+
+	endpoint := fmt.Sprintf("%s/api/system/kubernetes/contexts/%s", c.baseURL, url.PathEscape(contextID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("create delete context request: %w", err)
+	}
+
+	c.applyAuthHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete kubernetes context: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("meshery DELETE /api/system/kubernetes/contexts/%s returned %d: %s", contextID, resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	return nil
+}
+
 func (c *MesheryHTTPClient) applyAuthHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 	if c.token != "" {
@@ -501,6 +602,35 @@ func RegisterKubernetesTools(s *server.MCPServer, client KubernetesClient) {
 		),
 	)
 	s.AddTool(getClusterResourcesTool, getClusterResourcesHandler(client))
+
+	// 5. connect_cluster
+	connectClusterTool := mcp.NewTool("connect_cluster",
+		mcp.WithDescription("Connect a Kubernetes cluster to Meshery using a local kubeconfig file path or base64-encoded configuration."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithString("kubeconfig_path",
+			mcp.Description("Local file path to the kubeconfig file on the host machine (recommended for security to keep credentials out of model transcripts)"),
+		),
+		mcp.WithString("kubeconfig_base64",
+			mcp.Description("Base64-encoded kubeconfig content (used only when local file access is unavailable)"),
+		),
+		mcp.WithString("context_name",
+			mcp.Description("Optional context name to import or connect from the kubeconfig"),
+		),
+	)
+	s.AddTool(connectClusterTool, connectClusterHandler(client))
+
+	// 6. disconnect_cluster
+	disconnectClusterTool := mcp.NewTool("disconnect_cluster",
+		mcp.WithDescription("Remove a Kubernetes cluster connection from Meshery."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithString("cluster_id",
+			mcp.Required(),
+			mcp.Description("Identifier of the cluster to disconnect (Context ID, Connection ID, or Kubernetes Server ID)"),
+		),
+	)
+	s.AddTool(disconnectClusterTool, disconnectClusterHandler(client))
 }
 
 // listClustersHandler returns a tool handler that lists Kubernetes clusters.
@@ -731,6 +861,97 @@ func getClusterResourcesHandler(client KubernetesClient) func(context.Context, m
 		out, err := json.MarshalIndent(response, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal resources: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(out)), nil
+	}
+}
+
+// connectClusterHandler returns a tool handler that connects a Kubernetes cluster to Meshery.
+func connectClusterHandler(client KubernetesClient) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := parseArguments(req)
+		kubeconfigPath := getStringArg(args, "kubeconfig_path")
+		kubeconfigBase64 := getStringArg(args, "kubeconfig_base64")
+		contextName := getStringArg(args, "context_name")
+
+		if kubeconfigPath == "" && kubeconfigBase64 == "" {
+			return mcp.NewToolResultError("either kubeconfig_path or kubeconfig_base64 must be provided to connect a cluster"), nil
+		}
+
+		var configBytes []byte
+		var err error
+		if kubeconfigPath != "" {
+			configBytes, err = os.ReadFile(kubeconfigPath)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to read kubeconfig from path %q: %v", kubeconfigPath, err)), nil
+			}
+		} else {
+			configBytes, err = base64.StdEncoding.DecodeString(kubeconfigBase64)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to decode base64 kubeconfig: %v", err)), nil
+			}
+		}
+
+		if len(bytes.TrimSpace(configBytes)) == 0 {
+			return mcp.NewToolResultError("kubeconfig content cannot be empty"), nil
+		}
+
+		saveResp, err := client.AddK8sConfig(ctx, configBytes, contextName)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect cluster in Meshery: %v", err)), nil
+		}
+
+		response := map[string]interface{}{
+			"message":             "Kubeconfig processed by Meshery",
+			"registered_contexts": saveResp.RegisteredContexts,
+			"connected_contexts":  saveResp.ConnectedContexts,
+			"ignored_contexts":    saveResp.IgnoredContexts,
+			"errored_contexts":    saveResp.ErroredContexts,
+		}
+
+		out, err := json.MarshalIndent(response, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal response: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(out)), nil
+	}
+}
+
+// disconnectClusterHandler returns a tool handler that disconnects a cluster from Meshery.
+func disconnectClusterHandler(client KubernetesClient) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := parseArguments(req)
+		clusterID := getStringArg(args, "cluster_id")
+		if clusterID == "" {
+			return mcp.NewToolResultError("cluster_id parameter is required"), nil
+		}
+
+		targetCtx, err := resolveClusterContext(ctx, client, clusterID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		if targetCtx.ID == "" {
+			return mcp.NewToolResultError(fmt.Sprintf("resolved cluster %q does not have a valid context ID for disconnection", clusterID)), nil
+		}
+
+		if err := client.DeleteK8sContext(ctx, targetCtx.ID); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to disconnect cluster %s: %v", clusterID, err)), nil
+		}
+
+		response := map[string]interface{}{
+			"status":     "disconnected",
+			"cluster_id": clusterID,
+			"context_id": targetCtx.ID,
+			"name":       targetCtx.Name,
+			"server":     targetCtx.Server,
+		}
+
+		out, err := json.MarshalIndent(response, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal response: %v", err)), nil
 		}
 
 		return mcp.NewToolResultText(string(out)), nil

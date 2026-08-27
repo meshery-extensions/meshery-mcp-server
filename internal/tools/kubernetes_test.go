@@ -16,9 +16,13 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -549,24 +553,47 @@ func TestKubernetesTools_InProcessMCPServer(t *testing.T) {
 		t.Fatalf("list tools failed: %v", err)
 	}
 
-	expectedTools := map[string]bool{
-		"list_clusters":         false,
-		"get_cluster":           false,
-		"get_cluster_nodes":     false,
-		"get_cluster_resources": false,
+	expectedTools := map[string]struct {
+		readOnly    bool
+		destructive bool
+	}{
+		"list_clusters":         {readOnly: true, destructive: false},
+		"get_cluster":           {readOnly: true, destructive: false},
+		"get_cluster_nodes":     {readOnly: true, destructive: false},
+		"get_cluster_resources": {readOnly: true, destructive: false},
+		"connect_cluster":       {readOnly: false, destructive: false},
+		"disconnect_cluster":    {readOnly: false, destructive: true},
 	}
 
+	foundTools := make(map[string]bool)
+
 	for _, tool := range toolsResp.Tools {
-		if _, exists := expectedTools[tool.Name]; exists {
-			expectedTools[tool.Name] = true
-			if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
-				t.Errorf("tool %s should have ReadOnlyHint set to true", tool.Name)
+		if expected, exists := expectedTools[tool.Name]; exists {
+			foundTools[tool.Name] = true
+			if expected.readOnly {
+				if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
+					t.Errorf("tool %s should have ReadOnlyHint set to true", tool.Name)
+				}
+			} else {
+				if tool.Annotations.ReadOnlyHint != nil && *tool.Annotations.ReadOnlyHint {
+					t.Errorf("tool %s should not have ReadOnlyHint set to true", tool.Name)
+				}
+			}
+
+			if expected.destructive {
+				if tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint {
+					t.Errorf("tool %s should have DestructiveHint set to true", tool.Name)
+				}
+			} else {
+				if tool.Annotations.DestructiveHint != nil && *tool.Annotations.DestructiveHint {
+					t.Errorf("tool %s should not have DestructiveHint set to true", tool.Name)
+				}
 			}
 		}
 	}
 
-	for toolName, found := range expectedTools {
-		if !found {
+	for toolName := range expectedTools {
+		if !foundTools[toolName] {
 			t.Errorf("expected tool %s was not registered", toolName)
 		}
 	}
@@ -742,5 +769,251 @@ func TestCheckRedirect_RejectInsecureHTTPRedirect(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "insecure redirect") {
 		t.Fatalf("expected 'insecure redirect' error, got: %v", err)
+	}
+}
+
+func TestConnectCluster_ViaPath_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	kubeconfigPath := filepath.Join(tmpDir, "kubeconfig.yaml")
+	sampleConfig := []byte("apiVersion: v1\nclusters:\n- cluster:\n    server: https://cluster.example.com\n  name: test-cluster\n")
+	if err := os.WriteFile(kubeconfigPath, sampleConfig, 0600); err != nil {
+		t.Fatalf("failed to write sample kubeconfig: %v", err)
+	}
+
+	var receivedFileBytes []byte
+	var receivedContextName string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/system/kubernetes" && r.Method == http.MethodPost {
+			if err := r.ParseMultipartForm(10 << 20); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			file, _, err := r.FormFile("k8sfile")
+			if err != nil {
+				http.Error(w, "missing k8sfile", http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			receivedFileBytes, _ = io.ReadAll(file)
+			receivedContextName = r.FormValue("contextName")
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"registeredContexts": [],
+				"connectedContexts": [
+					{
+						"id": "ctx-new-123",
+						"name": "test-cluster",
+						"server": "https://cluster.example.com"
+					}
+				],
+				"ignoredContexts": [],
+				"erroredContexts": []
+			}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	client := mustNewMesheryHTTPClient(t, ts.URL, "test-token", "", ts.Client())
+	handler := connectClusterHandler(client)
+
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "connect_cluster",
+			Arguments: map[string]interface{}{
+				"kubeconfig_path": kubeconfigPath,
+				"context_name":    "test-cluster",
+			},
+		},
+	}
+
+	res, err := handler(context.Background(), req)
+	if err != nil || res.IsError {
+		t.Fatalf("handler failed: %v, result: %+v", err, res)
+	}
+
+	if string(receivedFileBytes) != string(sampleConfig) {
+		t.Errorf("expected uploaded kubeconfig bytes %q, got %q", string(sampleConfig), string(receivedFileBytes))
+	}
+	if receivedContextName != "test-cluster" {
+		t.Errorf("expected contextName 'test-cluster', got %q", receivedContextName)
+	}
+
+	text, _ := mcp.AsTextContent(res.Content[0])
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(text.Text), &parsed); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	connected, ok := parsed["connected_contexts"].([]interface{})
+	if !ok || len(connected) != 1 {
+		t.Fatalf("expected 1 connected context, got: %v", parsed["connected_contexts"])
+	}
+}
+
+func TestConnectCluster_ViaBase64_Success(t *testing.T) {
+	rawConfig := "apiVersion: v1\nkind: Config\n"
+	b64Config := base64.StdEncoding.EncodeToString([]byte(rawConfig))
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/system/kubernetes" && r.Method == http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"registeredContexts": [
+					{
+						"id": "ctx-b64",
+						"name": "b64-cluster",
+						"server": "https://b64.example.com"
+					}
+				],
+				"connectedContexts": [],
+				"ignoredContexts": [],
+				"erroredContexts": []
+			}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	client := mustNewMesheryHTTPClient(t, ts.URL, "test-token", "", ts.Client())
+	handler := connectClusterHandler(client)
+
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "connect_cluster",
+			Arguments: map[string]interface{}{
+				"kubeconfig_base64": b64Config,
+			},
+		},
+	}
+
+	res, err := handler(context.Background(), req)
+	if err != nil || res.IsError {
+		t.Fatalf("handler failed: %v, res: %+v", err, res)
+	}
+
+	text, _ := mcp.AsTextContent(res.Content[0])
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(text.Text), &parsed); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	registered, ok := parsed["registered_contexts"].([]interface{})
+	if !ok || len(registered) != 1 {
+		t.Fatalf("expected 1 registered context, got: %v", parsed["registered_contexts"])
+	}
+}
+
+func TestConnectCluster_MissingInputs(t *testing.T) {
+	client := mustNewMesheryHTTPClient(t, "http://localhost:9081", "", "", nil)
+	handler := connectClusterHandler(client)
+
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      "connect_cluster",
+			Arguments: map[string]interface{}{},
+		},
+	}
+
+	res, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result when missing both kubeconfig inputs")
+	}
+}
+
+func TestDisconnectCluster_Success(t *testing.T) {
+	var deletedContextID string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/system/kubernetes/contexts" && r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"totalCount": 1,
+				"contexts": [
+					{
+						"id": "ctx-delete-target",
+						"name": "cluster-to-delete",
+						"server": "https://k8s.example.com"
+					}
+				]
+			}`))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/system/kubernetes/contexts/") && r.Method == http.MethodDelete {
+			deletedContextID = strings.TrimPrefix(r.URL.Path, "/api/system/kubernetes/contexts/")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	client := mustNewMesheryHTTPClient(t, ts.URL, "test-token", "", ts.Client())
+	handler := disconnectClusterHandler(client)
+
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "disconnect_cluster",
+			Arguments: map[string]interface{}{
+				"cluster_id": "cluster-to-delete",
+			},
+		},
+	}
+
+	res, err := handler(context.Background(), req)
+	if err != nil || res.IsError {
+		t.Fatalf("handler failed: %v, res: %+v", err, res)
+	}
+
+	if deletedContextID != "ctx-delete-target" {
+		t.Errorf("expected deletedContextID 'ctx-delete-target', got %q", deletedContextID)
+	}
+
+	text, _ := mcp.AsTextContent(res.Content[0])
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(text.Text), &parsed); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if parsed["status"] != "disconnected" {
+		t.Errorf("expected status 'disconnected', got %v", parsed["status"])
+	}
+	if parsed["context_id"] != "ctx-delete-target" {
+		t.Errorf("expected context_id 'ctx-delete-target', got %v", parsed["context_id"])
+	}
+}
+
+func TestDisconnectCluster_NotFound(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/system/kubernetes/contexts" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"totalCount": 0, "contexts": []}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	client := mustNewMesheryHTTPClient(t, ts.URL, "test-token", "", ts.Client())
+	handler := disconnectClusterHandler(client)
+
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "disconnect_cluster",
+			Arguments: map[string]interface{}{
+				"cluster_id": "nonexistent-cluster",
+			},
+		},
+	}
+
+	res, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result when cluster is not found")
 	}
 }
