@@ -58,8 +58,15 @@ func TestServerInfoTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if len(toolsResp.Tools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(toolsResp.Tools))
+	var foundServerInfo bool
+	for _, tool := range toolsResp.Tools {
+		if tool.Name == "server_info" {
+			foundServerInfo = true
+			break
+		}
+	}
+	if !foundServerInfo {
+		t.Fatal("expected server_info tool to be registered")
 	}
 
 	result, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{

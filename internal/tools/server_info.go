@@ -32,6 +32,8 @@ func Register(s *server.MCPServer) {
 		mcp.WithDestructiveHintAnnotation(false),
 	)
 	s.AddTool(serverInfo, serverInfoHandler)
+
+	RegisterKubernetesTools(s, NewDefaultKubernetesClient())
 }
 
 // serverInfoHandler returns metadata about the Meshery MCP server.
