@@ -27,6 +27,15 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+func mustNewMesheryHTTPClient(t *testing.T, baseURL, token, provider string, httpClient *http.Client) *MesheryHTTPClient {
+	t.Helper()
+	c, err := NewMesheryHTTPClient(baseURL, token, provider, httpClient)
+	if err != nil {
+		t.Fatalf("mustNewMesheryHTTPClient: %v", err)
+	}
+	return c
+}
+
 func TestListClusters_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/system/kubernetes/contexts" {
@@ -64,7 +73,7 @@ func TestListClusters_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewMesheryHTTPClient(ts.URL, "test-token", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "test-token", "", ts.Client())
 	handler := listClustersHandler(client)
 
 	req := mcp.CallToolRequest{
@@ -119,7 +128,7 @@ func TestListClusters_AuthRedirect(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewMesheryHTTPClient(ts.URL, "", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "", "", ts.Client())
 	handler := listClustersHandler(client)
 
 	req := mcp.CallToolRequest{
@@ -190,7 +199,7 @@ func TestGetCluster_ByID_And_ConnectionID(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
 	handler := getClusterHandler(client)
 
 	// Test 1: Resolve by Context ID
@@ -245,7 +254,7 @@ func TestGetCluster_NotFound(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
 	handler := getClusterHandler(client)
 
 	req := mcp.CallToolRequest{
@@ -331,7 +340,7 @@ func TestGetClusterNodes_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
 	handler := getClusterNodesHandler(client)
 
 	req := mcp.CallToolRequest{
@@ -439,7 +448,7 @@ func TestGetClusterResources_Pods(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
 	handler := getClusterResourcesHandler(client)
 
 	req := mcp.CallToolRequest{
@@ -477,7 +486,7 @@ func TestGetClusterResources_Pods(t *testing.T) {
 }
 
 func TestGetClusterResources_MissingClusterID(t *testing.T) {
-	client := NewMesheryHTTPClient("http://localhost:9081", "token", "", nil)
+	client := mustNewMesheryHTTPClient(t, "http://localhost:9081", "token", "", nil)
 	handler := getClusterResourcesHandler(client)
 
 	req := mcp.CallToolRequest{
@@ -515,7 +524,7 @@ func TestKubernetesTools_InProcessMCPServer(t *testing.T) {
 	defer ts.Close()
 
 	s := server.NewMCPServer("meshery-test", "0.1.0")
-	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
 	RegisterKubernetesTools(s, client)
 
 	inProcClient, err := mcpclient.NewInProcessClient(s)
@@ -594,7 +603,7 @@ func TestGetClusterNodes_MissingKubernetesServerID(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
 	handler := getClusterNodesHandler(client)
 
 	req := mcp.CallToolRequest{
@@ -647,12 +656,45 @@ func TestResolveClusterContext_MultiPage(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
 	ctx, err := resolveClusterContext(context.Background(), client, "ctx-page-2")
 	if err != nil {
 		t.Fatalf("failed to resolve context across pages: %v", err)
 	}
 	if ctx.Name != "cluster-2" {
 		t.Errorf("expected cluster-2, got %s", ctx.Name)
+	}
+}
+
+func TestNewMesheryHTTPClient_Security(t *testing.T) {
+	// Remote HTTP with token should be rejected
+	_, err := NewMesheryHTTPClient("http://remote-meshery.example.com:9081", "secret-token", "", nil)
+	if err == nil {
+		t.Error("expected error for remote HTTP with token, got nil")
+	}
+
+	// Remote HTTPS with token should be allowed
+	_, err = NewMesheryHTTPClient("https://remote-meshery.example.com:9081", "secret-token", "", nil)
+	if err != nil {
+		t.Errorf("expected success for remote HTTPS with token, got: %v", err)
+	}
+
+	// Loopback HTTP with token should be allowed (localhost, 127.0.0.1, ::1)
+	loopbacks := []string{
+		"http://localhost:9081",
+		"http://127.0.0.1:9081",
+		"http://[::1]:9081",
+	}
+	for _, lb := range loopbacks {
+		_, err = NewMesheryHTTPClient(lb, "secret-token", "", nil)
+		if err != nil {
+			t.Errorf("expected success for loopback %s with token, got: %v", lb, err)
+		}
+	}
+
+	// Remote HTTP without token should be allowed
+	_, err = NewMesheryHTTPClient("http://remote-meshery.example.com:9081", "", "", nil)
+	if err != nil {
+		t.Errorf("expected success for remote HTTP without token, got: %v", err)
 	}
 }

@@ -110,12 +110,42 @@ type MesheryHTTPClient struct {
 	httpClient *http.Client
 }
 
+// errClient implements KubernetesClient by returning an initialization error.
+type errClient struct {
+	err error
+}
+
+func (e *errClient) GetK8sContexts(ctx context.Context, page, pageSize int, search string) (*MesheryK8sContextPage, error) {
+	return nil, e.err
+}
+
+func (e *errClient) GetMeshSyncResources(ctx context.Context, kubernetesServerID string, kind string, namespace string, page, pageSize int) (*MeshSyncResourcesResponse, error) {
+	return nil, e.err
+}
+
+func (e *errClient) Ping(ctx context.Context) error {
+	return e.err
+}
+
 // NewMesheryHTTPClient creates a new Meshery HTTP client.
-func NewMesheryHTTPClient(baseURL, token, provider string, httpClient *http.Client) *MesheryHTTPClient {
+// Rejects non-loopback HTTP endpoints when a token is provided to prevent credential exposure.
+func NewMesheryHTTPClient(baseURL, token, provider string, httpClient *http.Client) (*MesheryHTTPClient, error) {
 	if baseURL == "" {
 		baseURL = config.DefaultMeshServerURL
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
+
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL: %w", err)
+	}
+
+	if token != "" && u.Scheme == "http" {
+		host := u.Hostname()
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return nil, errors.New("bearer tokens require HTTPS unless using a loopback address")
+		}
+	}
 
 	if httpClient == nil {
 		httpClient = &http.Client{
@@ -141,13 +171,17 @@ func NewMesheryHTTPClient(baseURL, token, provider string, httpClient *http.Clie
 		token:      token,
 		provider:   provider,
 		httpClient: httpClient,
-	}
+	}, nil
 }
 
 // NewDefaultKubernetesClient initializes a client from the process environment config.
 func NewDefaultKubernetesClient() KubernetesClient {
 	cfg := config.Load()
-	return NewMesheryHTTPClient(cfg.MeshServerURL, cfg.MeshAPIToken, "", nil)
+	c, err := NewMesheryHTTPClient(cfg.MeshServerURL, cfg.MeshAPIToken, "", nil)
+	if err != nil {
+		return &errClient{err: err}
+	}
+	return c
 }
 
 // GetK8sContexts calls GET /api/system/kubernetes/contexts.
@@ -477,9 +511,13 @@ func getClusterHandler(client KubernetesClient) func(context.Context, mcp.CallTo
 
 		// If we have a kubernetesServerID, query MeshSync for node count
 		if targetCtx.KubernetesServerID != "" {
-			nodeRes, err := client.GetMeshSyncResources(ctx, targetCtx.KubernetesServerID, "Node", "", 1, 100)
+			nodeRes, err := client.GetMeshSyncResources(ctx, targetCtx.KubernetesServerID, "Node", "", 1, 1)
 			if err == nil && nodeRes != nil {
-				nodeCount = len(nodeRes.Resources)
+				if nodeRes.TotalCount > 0 {
+					nodeCount = int(nodeRes.TotalCount)
+				} else {
+					nodeCount = len(nodeRes.Resources)
+				}
 				if targetCtx.Reachable && nodeCount > 0 {
 					healthStatus = "Healthy"
 				}
@@ -529,14 +567,24 @@ func getClusterNodesHandler(client KubernetesClient) func(context.Context, mcp.C
 			return mcp.NewToolResultError(fmt.Sprintf("cluster %q has no associated kubernetesServerId; ensure MeshSync is deployed and active for this cluster", clusterID)), nil
 		}
 
-		nodeRes, err := client.GetMeshSyncResources(ctx, k8sServerID, "Node", "", 1, 100)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to fetch nodes for cluster %s: %v", clusterID, err)), nil
-		}
+		nodes := make([]NodeSummary, 0)
+		page := 1
+		pageSize := 50
 
-		nodes := make([]NodeSummary, 0, len(nodeRes.Resources))
-		for _, r := range nodeRes.Resources {
-			nodes = append(nodes, parseNodeResource(r))
+		for {
+			nodeRes, err := client.GetMeshSyncResources(ctx, k8sServerID, "Node", "", page, pageSize)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to fetch nodes for cluster %s: %v", clusterID, err)), nil
+			}
+
+			for _, r := range nodeRes.Resources {
+				nodes = append(nodes, parseNodeResource(r))
+			}
+
+			if len(nodeRes.Resources) == 0 || int64(len(nodes)) >= nodeRes.TotalCount {
+				break
+			}
+			page++
 		}
 
 		response := map[string]interface{}{
@@ -663,9 +711,6 @@ func parseNodeResource(r MeshSyncResource) NodeSummary {
 			}
 			if arch, ok := labels["kubernetes.io/arch"].(string); ok {
 				node.Architecture = arch
-			}
-			if os, ok := labels["kubernetes.io/os"].(string); ok {
-				node.OSImage = os
 			}
 		}
 	}
