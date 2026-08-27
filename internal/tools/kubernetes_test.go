@@ -80,8 +80,8 @@ func TestListClusters_Success(t *testing.T) {
 		Params: mcp.CallToolParams{
 			Name: "list_clusters",
 			Arguments: map[string]interface{}{
-				"page":     float64(1),
-				"pageSize": float64(10),
+				"page":      float64(0),
+				"page_size": float64(10),
 			},
 		},
 	}
@@ -299,9 +299,9 @@ func TestGetClusterNodes_Success(t *testing.T) {
 		if r.URL.Path == "/api/system/meshsync/resources" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
-				"page": 1,
-				"page_size": 100,
-				"total_count": 1,
+				"page": 0,
+				"pageSize": 100,
+				"totalCount": 1,
 				"resources": [
 					{
 						"id": "node-master-1",
@@ -410,9 +410,9 @@ func TestGetClusterResources_Pods(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
-				"page": 1,
-				"page_size": 25,
-				"total_count": 2,
+				"page": 0,
+				"pageSize": 25,
+				"totalCount": 2,
 				"resources": [
 					{
 						"id": "res-1",
@@ -633,7 +633,7 @@ func TestResolveClusterContext_MultiPage(t *testing.T) {
 		if r.URL.Path == "/api/system/kubernetes/contexts" {
 			w.Header().Set("Content-Type", "application/json")
 			page := r.URL.Query().Get("page")
-			if page == "1" {
+			if page == "0" {
 				_, _ = w.Write([]byte(`{
 					"totalCount": 2,
 					"contexts": [
@@ -642,7 +642,7 @@ func TestResolveClusterContext_MultiPage(t *testing.T) {
 				}`))
 				return
 			}
-			if page == "2" {
+			if page == "1" {
 				_, _ = w.Write([]byte(`{
 					"totalCount": 2,
 					"contexts": [
@@ -696,5 +696,51 @@ func TestNewMesheryHTTPClient_Security(t *testing.T) {
 	_, err = NewMesheryHTTPClient("http://remote-meshery.example.com:9081", "", "", nil)
 	if err != nil {
 		t.Errorf("expected success for remote HTTP without token, got: %v", err)
+	}
+}
+
+func TestMesheryProviderCookie_SentWithToken(t *testing.T) {
+	var capturedCookie *http.Cookie
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedCookie = nil
+		for _, c := range r.Cookies() {
+			if c.Name == "meshery-provider" {
+				capturedCookie = c
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"totalCount": 0, "contexts": []}`))
+	}))
+	defer ts.Close()
+
+	// 1. Explicit provider passed
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token-123", "CustomProvider", ts.Client())
+	_, _ = client.GetK8sContexts(context.Background(), 0, 10, "")
+	if capturedCookie == nil || capturedCookie.Value != "CustomProvider" {
+		t.Fatalf("expected meshery-provider cookie CustomProvider, got: %v", capturedCookie)
+	}
+
+	// 2. Unset provider defaults to "Meshery"
+	clientDefault := mustNewMesheryHTTPClient(t, ts.URL, "token-123", "", ts.Client())
+	_, _ = clientDefault.GetK8sContexts(context.Background(), 0, 10, "")
+	if capturedCookie == nil || capturedCookie.Value != "Meshery" {
+		t.Fatalf("expected default meshery-provider cookie Meshery, got: %v", capturedCookie)
+	}
+}
+
+func TestCheckRedirect_RejectInsecureHTTPRedirect(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Redirect to an external unencrypted HTTP address
+		http.Redirect(w, r, "http://external-insecure.example.com/api/test", http.StatusFound)
+	}))
+	defer ts.Close()
+
+	client := mustNewMesheryHTTPClient(t, ts.URL, "secret-token", "", ts.Client())
+	_, err := client.GetK8sContexts(context.Background(), 0, 10, "")
+	if err == nil {
+		t.Fatal("expected error on insecure plaintext redirect with token, got nil")
+	}
+	if !strings.Contains(err.Error(), "insecure redirect") {
+		t.Fatalf("expected 'insecure redirect' error, got: %v", err)
 	}
 }

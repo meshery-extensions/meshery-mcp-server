@@ -22,6 +22,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -64,11 +66,32 @@ type MeshSyncResource struct {
 }
 
 // MeshSyncResourcesResponse represents the API response for discovered MeshSync resources.
+// Meshery Server returns camelCase (pageSize, totalCount); alternate snake_case is also supported.
 type MeshSyncResourcesResponse struct {
 	Page       int                `json:"page"`
-	PageSize   int                `json:"page_size"`
-	TotalCount int64              `json:"total_count"`
+	PageSize   int                `json:"pageSize"`
+	TotalCount int64              `json:"totalCount"`
 	Resources  []MeshSyncResource `json:"resources"`
+}
+
+func (m *MeshSyncResourcesResponse) UnmarshalJSON(data []byte) error {
+	type Alias MeshSyncResourcesResponse
+	var aux struct {
+		Alias
+		AltPageSize   int   `json:"page_size"`
+		AltTotalCount int64 `json:"total_count"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*m = MeshSyncResourcesResponse(aux.Alias)
+	if m.PageSize == 0 && aux.AltPageSize != 0 {
+		m.PageSize = aux.AltPageSize
+	}
+	if m.TotalCount == 0 && aux.AltTotalCount != 0 {
+		m.TotalCount = aux.AltTotalCount
+	}
+	return nil
 }
 
 // NodeSummary contains details of a Kubernetes cluster node discovered by MeshSync.
@@ -160,6 +183,12 @@ func NewMesheryHTTPClient(baseURL, token, provider string, httpClient *http.Clie
 		if strings.Contains(req.URL.Path, "/provider") || strings.Contains(req.URL.Path, "/auth/login") {
 			return errors.New("authentication required: Meshery session expired or absent; please run 'mesheryctl system login' or set MESHERY_API_TOKEN")
 		}
+		if token != "" && req.URL.Scheme == "http" {
+			host := req.URL.Hostname()
+			if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+				return errors.New("insecure redirect: token-bearing requests cannot redirect to non-loopback HTTP")
+			}
+		}
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
@@ -174,10 +203,53 @@ func NewMesheryHTTPClient(baseURL, token, provider string, httpClient *http.Clie
 	}, nil
 }
 
+// defaultProvider returns the configured provider, or reads from ~/.meshery/auth.json,
+// or defaults to "Meshery" (the standard remote provider in Meshery Server).
+func defaultProvider() string {
+	if p := os.Getenv("MESHERY_PROVIDER"); p != "" {
+		return p
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		authPath := filepath.Join(home, ".meshery", "auth.json")
+		if data, err := os.ReadFile(authPath); err == nil {
+			var raw map[string]interface{}
+			if err := json.Unmarshal(data, &raw); err == nil {
+				if p, ok := raw["meshery-provider"].(string); ok && p != "" {
+					return p
+				}
+			}
+		}
+	}
+	return "Meshery"
+}
+
+// defaultToken returns MESHERY_API_TOKEN or loads the token from ~/.meshery/auth.json if present.
+func defaultToken() string {
+	if t := os.Getenv("MESHERY_API_TOKEN"); t != "" {
+		return t
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		authPath := filepath.Join(home, ".meshery", "auth.json")
+		if data, err := os.ReadFile(authPath); err == nil {
+			var raw map[string]interface{}
+			if err := json.Unmarshal(data, &raw); err == nil {
+				if t, ok := raw["token"].(string); ok && t != "" {
+					return t
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // NewDefaultKubernetesClient initializes a client from the process environment config.
 func NewDefaultKubernetesClient() KubernetesClient {
 	cfg := config.Load()
-	c, err := NewMesheryHTTPClient(cfg.MeshServerURL, cfg.MeshAPIToken, "", nil)
+	token := cfg.MeshAPIToken
+	if token == "" {
+		token = defaultToken()
+	}
+	c, err := NewMesheryHTTPClient(cfg.MeshServerURL, token, defaultProvider(), nil)
 	if err != nil {
 		return &errClient{err: err}
 	}
@@ -188,7 +260,7 @@ func NewDefaultKubernetesClient() KubernetesClient {
 func (c *MesheryHTTPClient) GetK8sContexts(ctx context.Context, page, pageSize int, search string) (*MesheryK8sContextPage, error) {
 	endpoint := c.baseURL + "/api/system/kubernetes/contexts"
 	q := url.Values{}
-	if page > 0 {
+	if page >= 0 {
 		q.Set("page", strconv.Itoa(page))
 	}
 	if pageSize > 0 {
@@ -285,7 +357,7 @@ func (c *MesheryHTTPClient) GetMeshSyncResources(ctx context.Context, kubernetes
 	if namespace != "" {
 		q.Set("namespace", namespace)
 	}
-	if page > 0 {
+	if page >= 0 {
 		q.Set("page", strconv.Itoa(page))
 	}
 	if pageSize > 0 {
@@ -348,8 +420,13 @@ func (c *MesheryHTTPClient) applyAuthHeaders(req *http.Request) {
 	if c.token != "" {
 		req.AddCookie(&http.Cookie{Name: "token", Value: c.token})
 		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	if c.provider != "" {
+
+		provider := c.provider
+		if provider == "" {
+			provider = defaultProvider()
+		}
+		req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: provider})
+	} else if c.provider != "" {
 		req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
 	}
 }
@@ -366,7 +443,7 @@ func RegisterKubernetesTools(s *server.MCPServer, client KubernetesClient) {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithNumber("page",
-			mcp.Description("Page number for paginated results (default: 1)"),
+			mcp.Description("Page number for paginated results (0-indexed, default: 0)"),
 		),
 		mcp.WithNumber("page_size",
 			mcp.Description("Number of cluster summaries per page (default: 25)"),
@@ -417,7 +494,7 @@ func RegisterKubernetesTools(s *server.MCPServer, client KubernetesClient) {
 			mcp.Description("Namespace filter (e.g., 'default', 'kube-system')"),
 		),
 		mcp.WithNumber("page",
-			mcp.Description("Page number for paginated results (default: 1)"),
+			mcp.Description("Page number for paginated results (0-indexed, default: 0)"),
 		),
 		mcp.WithNumber("page_size",
 			mcp.Description("Number of resources per page (default: 25)"),
@@ -430,7 +507,7 @@ func RegisterKubernetesTools(s *server.MCPServer, client KubernetesClient) {
 func listClustersHandler(client KubernetesClient) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := parseArguments(req)
-		page := getIntArg(args, "page", 1)
+		page := getIntArg(args, "page", 0)
 		pageSize := getIntArg(args, "page_size", 0)
 		if pageSize <= 0 {
 			pageSize = getIntArg(args, "pageSize", 25)
@@ -511,7 +588,7 @@ func getClusterHandler(client KubernetesClient) func(context.Context, mcp.CallTo
 
 		// If we have a kubernetesServerID, query MeshSync for node count
 		if targetCtx.KubernetesServerID != "" {
-			nodeRes, err := client.GetMeshSyncResources(ctx, targetCtx.KubernetesServerID, "Node", "", 1, 1)
+			nodeRes, err := client.GetMeshSyncResources(ctx, targetCtx.KubernetesServerID, "Node", "", 0, 1)
 			if err == nil && nodeRes != nil {
 				if nodeRes.TotalCount > 0 {
 					nodeCount = int(nodeRes.TotalCount)
@@ -568,7 +645,7 @@ func getClusterNodesHandler(client KubernetesClient) func(context.Context, mcp.C
 		}
 
 		nodes := make([]NodeSummary, 0)
-		page := 1
+		page := 0
 		pageSize := 50
 
 		for {
@@ -614,8 +691,11 @@ func getClusterResourcesHandler(client KubernetesClient) func(context.Context, m
 
 		kind := getStringArg(args, "resource_kind")
 		namespace := getStringArg(args, "namespace")
-		page := getIntArg(args, "page", 1)
-		pageSize := getIntArg(args, "page_size", 25)
+		page := getIntArg(args, "page", 0)
+		pageSize := getIntArg(args, "page_size", 0)
+		if pageSize <= 0 {
+			pageSize = getIntArg(args, "pageSize", 25)
+		}
 
 		targetCtx, err := resolveClusterContext(ctx, client, clusterID)
 		if err != nil {
@@ -661,7 +741,7 @@ func getClusterResourcesHandler(client KubernetesClient) func(context.Context, m
 // It paginates through all available contexts and checks ID, ConnectionID,
 // KubernetesServerID, and Name.
 func resolveClusterContext(ctx context.Context, client KubernetesClient, clusterID string) (*K8sContext, error) {
-	page := 1
+	page := 0
 	pageSize := 50
 	scanned := 0
 
