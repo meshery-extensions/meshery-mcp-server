@@ -334,7 +334,7 @@ func RegisterKubernetesTools(s *server.MCPServer, client KubernetesClient) {
 		mcp.WithNumber("page",
 			mcp.Description("Page number for paginated results (default: 1)"),
 		),
-		mcp.WithNumber("pageSize",
+		mcp.WithNumber("page_size",
 			mcp.Description("Number of cluster summaries per page (default: 25)"),
 		),
 		mcp.WithString("search",
@@ -397,7 +397,10 @@ func listClustersHandler(client KubernetesClient) func(context.Context, mcp.Call
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := parseArguments(req)
 		page := getIntArg(args, "page", 1)
-		pageSize := getIntArg(args, "pageSize", 25)
+		pageSize := getIntArg(args, "page_size", 0)
+		if pageSize <= 0 {
+			pageSize = getIntArg(args, "pageSize", 25)
+		}
 		search := getStringArg(args, "search")
 
 		contextPage, err := client.GetK8sContexts(ctx, page, pageSize, search)
@@ -523,7 +526,7 @@ func getClusterNodesHandler(client KubernetesClient) func(context.Context, mcp.C
 
 		k8sServerID := targetCtx.KubernetesServerID
 		if k8sServerID == "" {
-			k8sServerID = targetCtx.ID
+			return mcp.NewToolResultError(fmt.Sprintf("cluster %q has no associated kubernetesServerId; ensure MeshSync is deployed and active for this cluster", clusterID)), nil
 		}
 
 		nodeRes, err := client.GetMeshSyncResources(ctx, k8sServerID, "Node", "", 1, 100)
@@ -573,7 +576,7 @@ func getClusterResourcesHandler(client KubernetesClient) func(context.Context, m
 
 		k8sServerID := targetCtx.KubernetesServerID
 		if k8sServerID == "" {
-			k8sServerID = targetCtx.ID
+			return mcp.NewToolResultError(fmt.Sprintf("cluster %q has no associated kubernetesServerId; ensure MeshSync is deployed and active for this cluster", clusterID)), nil
 		}
 
 		meshSyncResp, err := client.GetMeshSyncResources(ctx, k8sServerID, kind, namespace, page, pageSize)
@@ -607,17 +610,30 @@ func getClusterResourcesHandler(client KubernetesClient) func(context.Context, m
 }
 
 // resolveClusterContext matches a cluster_id to a registered K8sContext.
-// It checks ID, ConnectionID, and KubernetesServerID.
+// It paginates through all available contexts and checks ID, ConnectionID,
+// KubernetesServerID, and Name.
 func resolveClusterContext(ctx context.Context, client KubernetesClient, clusterID string) (*K8sContext, error) {
-	page, err := client.GetK8sContexts(ctx, 1, 100, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve contexts for cluster resolution: %w", err)
-	}
+	page := 1
+	pageSize := 50
+	scanned := 0
 
-	for _, c := range page.Contexts {
-		if c.ID == clusterID || c.ConnectionID == clusterID || c.KubernetesServerID == clusterID || c.Name == clusterID {
-			return &c, nil
+	for {
+		res, err := client.GetK8sContexts(ctx, page, pageSize, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve contexts for cluster resolution: %w", err)
 		}
+
+		for _, c := range res.Contexts {
+			if c.ID == clusterID || c.ConnectionID == clusterID || c.KubernetesServerID == clusterID || c.Name == clusterID {
+				return &c, nil
+			}
+		}
+
+		scanned += len(res.Contexts)
+		if len(res.Contexts) == 0 || scanned >= res.TotalCount {
+			break
+		}
+		page++
 	}
 
 	return nil, fmt.Errorf("cluster %q not found in Meshery registered contexts; run list_clusters to see available clusters", clusterID)

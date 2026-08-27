@@ -167,9 +167,10 @@ func TestGetCluster_ByID_And_ConnectionID(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/api/system/meshsync/resources" {
-			// Verify clusterIds was passed as JSON array string
+			// Verify clusterIds was passed as a valid JSON array string containing the exact cluster ID
 			clusterIDs := r.URL.Query().Get("clusterIds")
-			if !strings.Contains(clusterIDs, "ksid-staging") {
+			var ids []string
+			if err := json.Unmarshal([]byte(clusterIDs), &ids); err != nil || len(ids) != 1 || ids[0] != "ksid-staging" {
 				http.Error(w, "missing or invalid clusterIds", http.StatusBadRequest)
 				return
 			}
@@ -569,5 +570,89 @@ func TestKubernetesTools_InProcessMCPServer(t *testing.T) {
 	})
 	if err != nil || callRes.IsError {
 		t.Fatalf("CallTool list_clusters failed: %v, result: %+v", err, callRes)
+	}
+}
+
+func TestGetClusterNodes_MissingKubernetesServerID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/system/kubernetes/contexts" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"totalCount": 1,
+				"contexts": [
+					{
+						"id": "ctx-noserverid",
+						"name": "cluster-no-server-id",
+						"kubernetesServerId": "",
+						"reachable": false
+					}
+				]
+			}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	handler := getClusterNodesHandler(client)
+
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "get_cluster_nodes",
+			Arguments: map[string]interface{}{
+				"cluster_id": "ctx-noserverid",
+			},
+		},
+	}
+	result, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handler returned go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error when kubernetesServerId is empty")
+	}
+
+	text, _ := mcp.AsTextContent(result.Content[0])
+	if !strings.Contains(text.Text, "has no associated kubernetesServerId") {
+		t.Errorf("expected missing kubernetesServerId message, got: %s", text.Text)
+	}
+}
+
+func TestResolveClusterContext_MultiPage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/system/kubernetes/contexts" {
+			w.Header().Set("Content-Type", "application/json")
+			page := r.URL.Query().Get("page")
+			if page == "1" {
+				_, _ = w.Write([]byte(`{
+					"totalCount": 2,
+					"contexts": [
+						{"id": "ctx-page-1", "name": "cluster-1"}
+					]
+				}`))
+				return
+			}
+			if page == "2" {
+				_, _ = w.Write([]byte(`{
+					"totalCount": 2,
+					"contexts": [
+						{"id": "ctx-page-2", "name": "cluster-2"}
+					]
+				}`))
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	client := NewMesheryHTTPClient(ts.URL, "token", "", ts.Client())
+	ctx, err := resolveClusterContext(context.Background(), client, "ctx-page-2")
+	if err != nil {
+		t.Fatalf("failed to resolve context across pages: %v", err)
+	}
+	if ctx.Name != "cluster-2" {
+		t.Errorf("expected cluster-2, got %s", ctx.Name)
 	}
 }
