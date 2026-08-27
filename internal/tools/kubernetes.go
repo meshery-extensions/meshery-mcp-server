@@ -437,7 +437,19 @@ func (c *MesheryHTTPClient) Ping(ctx context.Context) error {
 }
 
 // AddK8sConfig registers a cluster in Meshery by uploading kubeconfig bytes via POST /api/system/kubernetes.
+// Enforces HTTPS for remote endpoints to prevent credential exposure over plaintext HTTP.
 func (c *MesheryHTTPClient) AddK8sConfig(ctx context.Context, kubeconfigBytes []byte, contextName string) (*SaveK8sContextResponse, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL: %w", err)
+	}
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return nil, errors.New("uploading kubeconfig requires HTTPS unless connecting to a loopback address")
+		}
+	}
+
 	endpoint := c.baseURL + "/api/system/kubernetes"
 
 	body := &bytes.Buffer{}
@@ -902,6 +914,14 @@ func connectClusterHandler(client KubernetesClient) func(context.Context, mcp.Ca
 			return mcp.NewToolResultError(fmt.Sprintf("failed to connect cluster in Meshery: %v", err)), nil
 		}
 
+		if len(saveResp.RegisteredContexts) == 0 && len(saveResp.ConnectedContexts) == 0 {
+			detail, _ := json.Marshal(map[string]interface{}{
+				"ignored_contexts": saveResp.IgnoredContexts,
+				"errored_contexts": saveResp.ErroredContexts,
+			})
+			return mcp.NewToolResultError(fmt.Sprintf("Meshery processed the kubeconfig but registered no clusters: %s", string(detail))), nil
+		}
+
 		response := map[string]interface{}{
 			"message":             "Kubeconfig processed by Meshery",
 			"registered_contexts": saveResp.RegisteredContexts,
@@ -959,12 +979,14 @@ func disconnectClusterHandler(client KubernetesClient) func(context.Context, mcp
 }
 
 // resolveClusterContext matches a cluster_id to a registered K8sContext.
-// It paginates through all available contexts and checks ID, ConnectionID,
-// KubernetesServerID, and Name.
+// Direct ID matches (ID, ConnectionID, or KubernetesServerID) take immediate priority.
+// If matched by Name, it verifies uniqueness so that ambiguous names across clusters
+// are safely rejected before destructive operations or queries can affect the wrong context.
 func resolveClusterContext(ctx context.Context, client KubernetesClient, clusterID string) (*K8sContext, error) {
 	page := 0
 	pageSize := 50
 	scanned := 0
+	var nameMatches []K8sContext
 
 	for {
 		res, err := client.GetK8sContexts(ctx, page, pageSize, "")
@@ -973,8 +995,12 @@ func resolveClusterContext(ctx context.Context, client KubernetesClient, cluster
 		}
 
 		for _, c := range res.Contexts {
-			if c.ID == clusterID || c.ConnectionID == clusterID || c.KubernetesServerID == clusterID || c.Name == clusterID {
+			// Direct ID match takes immediate precedence
+			if c.ID == clusterID || c.ConnectionID == clusterID || c.KubernetesServerID == clusterID {
 				return &c, nil
+			}
+			if c.Name == clusterID {
+				nameMatches = append(nameMatches, c)
 			}
 		}
 
@@ -983,6 +1009,13 @@ func resolveClusterContext(ctx context.Context, client KubernetesClient, cluster
 			break
 		}
 		page++
+	}
+
+	if len(nameMatches) == 1 {
+		return &nameMatches[0], nil
+	}
+	if len(nameMatches) > 1 {
+		return nil, fmt.Errorf("cluster name %q is ambiguous and matches %d registered contexts; please specify the exact Context ID, Connection ID, or Kubernetes Server ID instead", clusterID, len(nameMatches))
 	}
 
 	return nil, fmt.Errorf("cluster %q not found in Meshery registered contexts; run list_clusters to see available clusters", clusterID)

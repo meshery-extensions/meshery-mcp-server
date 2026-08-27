@@ -1017,3 +1017,94 @@ func TestDisconnectCluster_NotFound(t *testing.T) {
 		t.Fatal("expected error result when cluster is not found")
 	}
 }
+
+func TestAddK8sConfig_RejectRemoteHTTP(t *testing.T) {
+	client := &MesheryHTTPClient{
+		baseURL:    "http://remote-meshery.example.com:9081",
+		httpClient: http.DefaultClient,
+	}
+	_, err := client.AddK8sConfig(context.Background(), []byte("sample"), "")
+	if err == nil {
+		t.Fatal("expected error for remote HTTP kubeconfig upload, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires HTTPS") {
+		t.Fatalf("expected HTTPS requirement error, got: %v", err)
+	}
+}
+
+func TestConnectCluster_AllContextsFailed(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"registeredContexts": [],
+			"connectedContexts": [],
+			"ignoredContexts": [],
+			"erroredContexts": [{"id": "ctx-err", "name": "bad-cluster"}]
+		}`))
+	}))
+	defer ts.Close()
+
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
+	handler := connectClusterHandler(client)
+
+	b64Config := base64.StdEncoding.EncodeToString([]byte("apiVersion: v1\n"))
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "connect_cluster",
+			Arguments: map[string]interface{}{
+				"kubeconfig_base64": b64Config,
+			},
+		},
+	}
+
+	res, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected tool error result when all contexts fail registration")
+	}
+}
+
+func TestDisconnectCluster_AmbiguousName(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/system/kubernetes/contexts" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"totalCount": 2,
+				"contexts": [
+					{"id": "ctx-1", "name": "minikube"},
+					{"id": "ctx-2", "name": "minikube"}
+				]
+			}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	client := mustNewMesheryHTTPClient(t, ts.URL, "token", "", ts.Client())
+	handler := disconnectClusterHandler(client)
+
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "disconnect_cluster",
+			Arguments: map[string]interface{}{
+				"cluster_id": "minikube",
+			},
+		},
+	}
+
+	res, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected tool error result when cluster name is ambiguous")
+	}
+
+	text, _ := mcp.AsTextContent(res.Content[0])
+	if !strings.Contains(text.Text, "ambiguous") {
+		t.Fatalf("expected error message mentioning ambiguity, got: %s", text.Text)
+	}
+}
