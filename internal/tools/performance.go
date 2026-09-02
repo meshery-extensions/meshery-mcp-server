@@ -36,6 +36,12 @@ type PerformanceTestParams struct {
 }
 
 // LatencyPercentiles holds latency percentiles in milliseconds.
+//
+// Field names carry a unit suffix (p50_ms, not p50; throughput_rps, not
+// throughput) rather than matching issue #14's bare wording verbatim. This
+// is an intentional, documented deviation for clarity in tool output an AI
+// agent will read directly - open to renaming to match the issue exactly if
+// maintainers prefer strict field-name parity.
 type LatencyPercentiles struct {
 	P50  float64 `json:"p50_ms"`
 	P90  float64 `json:"p90_ms"`
@@ -151,6 +157,8 @@ func RegisterPerformanceTools(s *server.MCPServer, client PerformanceClient) {
 	s.AddTool(deleteTool, deletePerformanceTestHandler(client))
 }
 
+// runPerformanceTestHandler validates run_performance_test's inputs and
+// starts a load test via client.
 func runPerformanceTestHandler(client PerformanceClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		name, err := req.RequireString("name")
@@ -210,6 +218,7 @@ func runPerformanceTestHandler(client PerformanceClient) server.ToolHandlerFunc 
 	}
 }
 
+// getPerformanceTestHandler returns one test's current status and results.
 func getPerformanceTestHandler(client PerformanceClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		testID, err := req.RequireString("test_id")
@@ -225,6 +234,7 @@ func getPerformanceTestHandler(client PerformanceClient) server.ToolHandlerFunc 
 	}
 }
 
+// listPerformanceTestsHandler returns one page of tracked test summaries.
 func listPerformanceTestsHandler(client PerformanceClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		page := req.GetInt("page", 0)
@@ -244,6 +254,8 @@ func listPerformanceTestsHandler(client PerformanceClient) server.ToolHandlerFun
 	}
 }
 
+// comparePerformanceTestsHandler diffs two completed tests, rejecting the
+// request if either is missing or not yet completed.
 func comparePerformanceTestsHandler(client PerformanceClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		idA, err := req.RequireString("test_id_a")
@@ -279,6 +291,7 @@ func comparePerformanceTestsHandler(client PerformanceClient) server.ToolHandler
 	}
 }
 
+// deletePerformanceTestHandler removes a tracked test from client.
 func deletePerformanceTestHandler(client PerformanceClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		testID, err := req.RequireString("test_id")
@@ -328,6 +341,7 @@ func validateTestURL(raw string) error {
 	return nil
 }
 
+// jsonToolResult marshals v as indented JSON and wraps it in a text tool result.
 func jsonToolResult(v interface{}) (*mcp.CallToolResult, error) {
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -358,6 +372,8 @@ type memoryPerformanceClient struct {
 	order []string // most recently started test ID first
 }
 
+// newMemoryPerformanceClient builds a memoryPerformanceClient that runs load
+// tests through runner.
 func newMemoryPerformanceClient(runner loadTestRunner) *memoryPerformanceClient {
 	return &memoryPerformanceClient{
 		runner: runner,
@@ -365,6 +381,8 @@ func newMemoryPerformanceClient(runner loadTestRunner) *memoryPerformanceClient 
 	}
 }
 
+// RunTest generates a test ID, records it as running, and starts the load
+// test in the background, returning the ID immediately.
 func (c *memoryPerformanceClient) RunTest(ctx context.Context, params PerformanceTestParams) (string, error) {
 	id := uuid.NewString()
 	result := &PerformanceTestResult{
@@ -387,6 +405,8 @@ func (c *memoryPerformanceClient) RunTest(ctx context.Context, params Performanc
 	return id, nil
 }
 
+// runTest runs the load test identified by id to completion (or failure)
+// and records the outcome. Intended to be called via `go c.runTest(...)`.
 func (c *memoryPerformanceClient) runTest(id string, params PerformanceTestParams) {
 	raw, err := c.runner.RunLoadTest(context.Background(), meshery.RunLoadTestParams{
 		TestUUID:           id,
@@ -427,6 +447,7 @@ func (c *memoryPerformanceClient) runTest(id string, params PerformanceTestParam
 	result.TotalRequests = totalRequests
 }
 
+// GetTest returns a copy of the tracked test's current state.
 func (c *memoryPerformanceClient) GetTest(ctx context.Context, testID string) (*PerformanceTestResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -439,6 +460,8 @@ func (c *memoryPerformanceClient) GetTest(ctx context.Context, testID string) (*
 	return &resultCopy, nil
 }
 
+// ListTests returns one page of tracked test summaries, most recently
+// started first.
 func (c *memoryPerformanceClient) ListTests(ctx context.Context, page, pageSize int) (*PerformanceTestPage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -471,6 +494,7 @@ func (c *memoryPerformanceClient) ListTests(ctx context.Context, page, pageSize 
 	}, nil
 }
 
+// DeleteTest removes a tracked test, returning an error if it is unknown.
 func (c *memoryPerformanceClient) DeleteTest(ctx context.Context, testID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -504,18 +528,22 @@ func NewDefaultPerformanceClient() PerformanceClient {
 // default client could not be constructed (e.g. bad MESHERY_SERVER_URL).
 type errPerformanceClient struct{ err error }
 
+// RunTest always returns the client construction error.
 func (c *errPerformanceClient) RunTest(context.Context, PerformanceTestParams) (string, error) {
 	return "", c.err
 }
 
+// GetTest always returns the client construction error.
 func (c *errPerformanceClient) GetTest(context.Context, string) (*PerformanceTestResult, error) {
 	return nil, c.err
 }
 
+// ListTests always returns the client construction error.
 func (c *errPerformanceClient) ListTests(context.Context, int, int) (*PerformanceTestPage, error) {
 	return nil, c.err
 }
 
+// DeleteTest always returns the client construction error.
 func (c *errPerformanceClient) DeleteTest(context.Context, string) error {
 	return c.err
 }

@@ -27,6 +27,7 @@ func Load() *Config {
 	}
 }
 
+// envOr returns the environment variable's value, or fallback if it is unset.
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

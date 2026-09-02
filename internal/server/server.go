@@ -9,6 +9,7 @@ import (
 	"github.com/meshery-extensions/meshery-mcp-server/internal/version"
 )
 
+// New builds a Meshery MCP server with every tool surface registered.
 func New() (*server.MCPServer, error) {
 	s := server.NewMCPServer(version.Name, version.Version)
 
@@ -25,6 +26,7 @@ func New() (*server.MCPServer, error) {
 	return s, nil
 }
 
+// Serve runs s over stdio until the client disconnects.
 func Serve(s *server.MCPServer) error {
 	return server.ServeStdio(s)
 }

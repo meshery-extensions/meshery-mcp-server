@@ -8,6 +8,7 @@ import (
 	"github.com/meshery-extensions/meshery-mcp-server/internal/server"
 )
 
+// main wires up and serves the Meshery MCP server over stdio.
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	log.SetOutput(os.Stderr)

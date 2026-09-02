@@ -14,6 +14,8 @@ import (
 
 // --- helpers ---------------------------------------------------------------
 
+// resultText extracts the text of a tool result's single content item,
+// failing the test if the result doesn't have exactly one text item.
 func resultText(t *testing.T, res *mcp.CallToolResult) string {
 	t.Helper()
 	if len(res.Content) != 1 {
@@ -26,6 +28,8 @@ func resultText(t *testing.T, res *mcp.CallToolResult) string {
 	return tc.Text
 }
 
+// callToolRequest builds an mcp.CallToolRequest carrying args as its
+// arguments, matching the shape a real MCP client sends.
 func callToolRequest(args map[string]interface{}) mcp.CallToolRequest {
 	return mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
@@ -34,6 +38,9 @@ func callToolRequest(args map[string]interface{}) mcp.CallToolRequest {
 	}
 }
 
+// fakePerformanceClient is a PerformanceClient whose behavior is set per
+// test via its function fields, for handler-level tests that don't need a
+// real memoryPerformanceClient.
 type fakePerformanceClient struct {
 	runTestFunc    func(ctx context.Context, params PerformanceTestParams) (string, error)
 	getTestFunc    func(ctx context.Context, testID string) (*PerformanceTestResult, error)
@@ -41,18 +48,22 @@ type fakePerformanceClient struct {
 	deleteTestFunc func(ctx context.Context, testID string) error
 }
 
+// RunTest delegates to f.runTestFunc.
 func (f *fakePerformanceClient) RunTest(ctx context.Context, params PerformanceTestParams) (string, error) {
 	return f.runTestFunc(ctx, params)
 }
 
+// GetTest delegates to f.getTestFunc.
 func (f *fakePerformanceClient) GetTest(ctx context.Context, testID string) (*PerformanceTestResult, error) {
 	return f.getTestFunc(ctx, testID)
 }
 
+// ListTests delegates to f.listTestsFunc.
 func (f *fakePerformanceClient) ListTests(ctx context.Context, page, pageSize int) (*PerformanceTestPage, error) {
 	return f.listTestsFunc(ctx, page, pageSize)
 }
 
+// DeleteTest delegates to f.deleteTestFunc.
 func (f *fakePerformanceClient) DeleteTest(ctx context.Context, testID string) error {
 	return f.deleteTestFunc(ctx, testID)
 }
@@ -215,15 +226,20 @@ type fakeRunner struct {
 	err     error
 }
 
+// newFakeRunner builds a fakeRunner blocked until its proceed channel is closed.
 func newFakeRunner() *fakeRunner {
 	return &fakeRunner{proceed: make(chan struct{})}
 }
 
+// RunLoadTest blocks until f.proceed is closed, then returns the
+// preconfigured f.raw/f.err.
 func (f *fakeRunner) RunLoadTest(ctx context.Context, p meshery.RunLoadTestParams) (*meshery.RawResult, error) {
 	<-f.proceed
 	return f.raw, f.err
 }
 
+// waitForStatus polls client.GetTest until testID reaches status or a
+// 2-second deadline passes, failing the test in the latter case.
 func waitForStatus(t *testing.T, client PerformanceClient, testID, status string) *PerformanceTestResult {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -241,6 +257,8 @@ func waitForStatus(t *testing.T, client PerformanceClient, testID, status string
 	return nil
 }
 
+// fortioRawResult returns a meshery.RawResult wrapping a realistic Fortio
+// runner-results fixture (500 requests, all 2xx, p50-p99.9 latencies set).
 func fortioRawResult(t *testing.T) *meshery.RawResult {
 	t.Helper()
 	fixture := `{

@@ -54,6 +54,7 @@ func NewClient(cfg *config.Config, httpClient *http.Client) (*Client, error) {
 	}, nil
 }
 
+// applyAuthHeaders attaches the token and provider auth headers/cookies Meshery expects.
 func (c *Client) applyAuthHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if c.token != "" {
@@ -105,6 +106,12 @@ func (c *Client) RunLoadTest(ctx context.Context, p RunLoadTestParams) (*RawResu
 	q.Set("dur", "s")
 	q.Set("qps", strconv.Itoa(p.RPS))
 	q.Set("c", strconv.Itoa(p.ConcurrentRequests))
+	// Accepted by the endpoint but not, as of meshery/meshery@master, ever
+	// assigned to the result it streams back (executeLoadTest/
+	// persistPerformanceTestResult receive testUUID but never set it on
+	// models.MesheryResult). Sent anyway in case a future server version
+	// starts honoring it; this client never relies on it for correlation -
+	// each call owns its own response stream instead.
 	q.Set("uuid", p.TestUUID)
 
 	reqURL := c.baseURL + "/api/perf/profile?" + q.Encode()
