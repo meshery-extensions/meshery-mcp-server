@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -43,6 +44,12 @@ func NewClient(cfg *config.Config, httpClient *http.Client) (*Client, error) {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return nil, fmt.Errorf("invalid meshery server URL %q", cfg.MeshServerURL)
 	}
+	// applyAuthHeaders sends the API token in both a cookie and an
+	// Authorization header, so refuse to send it in cleartext to anything
+	// but the local machine.
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return nil, fmt.Errorf("refusing to send credentials over plaintext http to non-loopback host %q; use https", u.Hostname())
+	}
 	if httpClient == nil {
 		httpClient = &http.Client{}
 	}
@@ -52,6 +59,16 @@ func NewClient(cfg *config.Config, httpClient *http.Client) (*Client, error) {
 		provider:   cfg.MeshProvider,
 		httpClient: httpClient,
 	}, nil
+}
+
+// isLoopbackHost reports whether host (a URL hostname, without port) refers
+// to the local machine.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // applyAuthHeaders attaches the token and provider auth headers/cookies Meshery expects.

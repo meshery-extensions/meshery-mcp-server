@@ -26,6 +26,22 @@ const (
 	StatusFailed    = "failed"
 )
 
+// maxPageSize bounds list_performance_tests' page_size, both to keep
+// responses reasonably sized and, together with the overflow-safe bounds
+// check in ListTests, to keep page*pageSize from ever being computed with
+// operands large enough to overflow int.
+const maxPageSize = 200
+
+// run_performance_test generates real traffic against a caller-supplied
+// URL; these caps bound how much load a single call can request, so a
+// mistaken or malicious input can't turn one tool call into an
+// effectively unbounded, long-running load test.
+const (
+	maxDurationSeconds    = 300
+	maxRPS                = 10000
+	maxConcurrentRequests = 1000
+)
+
 // PerformanceTestParams are the validated inputs to start a load test.
 type PerformanceTestParams struct {
 	Name               string
@@ -116,9 +132,9 @@ func RegisterPerformanceTools(s *server.MCPServer, client PerformanceClient) {
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithString("name", mcp.Required(), mcp.Description("A name for this test run.")),
 		mcp.WithString("url", mcp.Required(), mcp.Description("Target URL to load test, e.g. https://example.com.")),
-		mcp.WithNumber("duration", mcp.Required(), mcp.Description("Test duration in seconds (positive integer).")),
-		mcp.WithNumber("rps", mcp.Required(), mcp.Description("Target requests per second (positive integer).")),
-		mcp.WithNumber("concurrent_requests", mcp.Required(), mcp.Description("Number of concurrent connections to use (positive integer).")),
+		mcp.WithNumber("duration", mcp.Required(), mcp.Description("Test duration in seconds (positive integer, max 300).")),
+		mcp.WithNumber("rps", mcp.Required(), mcp.Description("Target requests per second (positive integer, max 10000).")),
+		mcp.WithNumber("concurrent_requests", mcp.Required(), mcp.Description("Number of concurrent connections to use (positive integer, max 1000).")),
 	)
 	s.AddTool(runTool, runPerformanceTestHandler(client))
 
@@ -181,6 +197,9 @@ func runPerformanceTestHandler(client PerformanceClient) server.ToolHandlerFunc 
 		if duration <= 0 {
 			return mcp.NewToolResultError("duration must be a positive number of seconds"), nil
 		}
+		if duration > maxDurationSeconds {
+			return mcp.NewToolResultError(fmt.Sprintf("duration must be at most %d seconds", maxDurationSeconds)), nil
+		}
 
 		rps, err := req.RequireInt("rps")
 		if err != nil {
@@ -189,6 +208,9 @@ func runPerformanceTestHandler(client PerformanceClient) server.ToolHandlerFunc 
 		if rps <= 0 {
 			return mcp.NewToolResultError("rps must be a positive number"), nil
 		}
+		if rps > maxRPS {
+			return mcp.NewToolResultError(fmt.Sprintf("rps must be at most %d", maxRPS)), nil
+		}
 
 		concurrent, err := req.RequireInt("concurrent_requests")
 		if err != nil {
@@ -196,6 +218,9 @@ func runPerformanceTestHandler(client PerformanceClient) server.ToolHandlerFunc 
 		}
 		if concurrent <= 0 {
 			return mcp.NewToolResultError("concurrent_requests must be a positive number"), nil
+		}
+		if concurrent > maxConcurrentRequests {
+			return mcp.NewToolResultError(fmt.Sprintf("concurrent_requests must be at most %d", maxConcurrentRequests)), nil
 		}
 
 		testID, err := client.RunTest(ctx, PerformanceTestParams{
@@ -244,6 +269,9 @@ func listPerformanceTestsHandler(client PerformanceClient) server.ToolHandlerFun
 		}
 		if pageSize <= 0 {
 			return mcp.NewToolResultError("page_size must be a positive number"), nil
+		}
+		if pageSize > maxPageSize {
+			pageSize = maxPageSize
 		}
 
 		result, err := client.ListTests(ctx, page, pageSize)
@@ -367,17 +395,25 @@ type loadTestRunner interface {
 type memoryPerformanceClient struct {
 	runner loadTestRunner
 
-	mu    sync.Mutex
-	tests map[string]*PerformanceTestResult
-	order []string // most recently started test ID first
+	mu      sync.Mutex
+	tests   map[string]*PerformanceTestResult
+	order   []string // most recently started test ID first
+	cancels map[string]context.CancelFunc
 }
+
+// maxTrackedTests bounds how many test records memoryPerformanceClient
+// keeps, so a long-running server doesn't grow this map without limit.
+// Still-running tests are never evicted; the cap is a soft limit that can
+// be temporarily exceeded while many tests run concurrently.
+const maxTrackedTests = 500
 
 // newMemoryPerformanceClient builds a memoryPerformanceClient that runs load
 // tests through runner.
 func newMemoryPerformanceClient(runner loadTestRunner) *memoryPerformanceClient {
 	return &memoryPerformanceClient{
-		runner: runner,
-		tests:  make(map[string]*PerformanceTestResult),
+		runner:  runner,
+		tests:   make(map[string]*PerformanceTestResult),
+		cancels: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -385,6 +421,13 @@ func newMemoryPerformanceClient(runner loadTestRunner) *memoryPerformanceClient 
 // test in the background, returning the ID immediately.
 func (c *memoryPerformanceClient) RunTest(ctx context.Context, params PerformanceTestParams) (string, error) {
 	id := uuid.NewString()
+	// The load test outlives the MCP tool call that started it, so it runs
+	// against its own cancelable context rather than the request's context.
+	// Canceling it (via DeleteTest) stops this server from waiting on and
+	// tracking the test; it does not stop Meshery's own load generation,
+	// since meshery/meshery's executeLoadTest runs on a context.Background()
+	// of its own, independent of the client connection.
+	runCtx, cancel := context.WithCancel(context.Background())
 	result := &PerformanceTestResult{
 		ID:        id,
 		Name:      params.Name,
@@ -396,19 +439,43 @@ func (c *memoryPerformanceClient) RunTest(ctx context.Context, params Performanc
 	c.mu.Lock()
 	c.tests[id] = result
 	c.order = append([]string{id}, c.order...)
+	c.cancels[id] = cancel
+	c.evictOldestLocked()
 	c.mu.Unlock()
 
-	// The load test outlives the MCP tool call that started it, so it runs
-	// against a background context rather than the request's context.
-	go c.runTest(id, params)
+	go c.runTest(runCtx, id, params)
 
 	return id, nil
 }
 
+// evictOldestLocked removes tracked tests beyond maxTrackedTests, oldest
+// first, skipping any still running. Callers must hold c.mu.
+func (c *memoryPerformanceClient) evictOldestLocked() {
+	for len(c.order) > maxTrackedTests {
+		evicted := false
+		for i := len(c.order) - 1; i >= 0; i-- {
+			id := c.order[i]
+			if c.tests[id].Status == StatusRunning {
+				continue
+			}
+			delete(c.tests, id)
+			delete(c.cancels, id)
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			evicted = true
+			break
+		}
+		if !evicted {
+			// Every tracked test is still running; accept exceeding the cap
+			// rather than evicting one we can't safely forget.
+			break
+		}
+	}
+}
+
 // runTest runs the load test identified by id to completion (or failure)
 // and records the outcome. Intended to be called via `go c.runTest(...)`.
-func (c *memoryPerformanceClient) runTest(id string, params PerformanceTestParams) {
-	raw, err := c.runner.RunLoadTest(context.Background(), meshery.RunLoadTestParams{
+func (c *memoryPerformanceClient) runTest(ctx context.Context, id string, params PerformanceTestParams) {
+	raw, err := c.runner.RunLoadTest(ctx, meshery.RunLoadTestParams{
 		TestUUID:           id,
 		Name:               params.Name,
 		URL:                params.URL,
@@ -419,6 +486,10 @@ func (c *memoryPerformanceClient) runTest(id string, params PerformanceTestParam
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if cancel, ok := c.cancels[id]; ok {
+		cancel()
+		delete(c.cancels, id)
+	}
 	result, ok := c.tests[id]
 	if !ok {
 		return // deleted while the test was running
@@ -468,8 +539,13 @@ func (c *memoryPerformanceClient) ListTests(ctx context.Context, page, pageSize 
 
 	total := len(c.order)
 	summaries := []PerformanceTestSummary{}
-	start := page * pageSize
-	if start < total {
+	// Guard against int overflow in page*pageSize: an MCP client can send
+	// an arbitrarily large page (e.g. 1e18), and computing start directly
+	// would wrap around and panic on the slice below. Comparing page against
+	// the highest valid page index first means the multiplication below is
+	// only ever performed once page is already known to be in range.
+	if pageSize > 0 && total > 0 && page <= (total-1)/pageSize {
+		start := page * pageSize
 		end := start + pageSize
 		if end > total {
 			end = total
@@ -494,13 +570,19 @@ func (c *memoryPerformanceClient) ListTests(ctx context.Context, page, pageSize 
 	}, nil
 }
 
-// DeleteTest removes a tracked test, returning an error if it is unknown.
+// DeleteTest removes a tracked test, returning an error if it is unknown. If
+// the test is still running, this also cancels this server's connection to
+// it (see the comment in RunTest on what that does and does not stop).
 func (c *memoryPerformanceClient) DeleteTest(ctx context.Context, testID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if _, ok := c.tests[testID]; !ok {
 		return fmt.Errorf("performance test %q not found", testID)
+	}
+	if cancel, ok := c.cancels[testID]; ok {
+		cancel()
+		delete(c.cancels, testID)
 	}
 	delete(c.tests, testID)
 	for i, id := range c.order {

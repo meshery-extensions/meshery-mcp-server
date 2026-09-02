@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -383,6 +386,89 @@ func TestMemoryPerformanceClient_ListTests_Pagination(t *testing.T) {
 	}
 }
 
+// TestMemoryPerformanceClient_ListTests_LargePageNoPanic is a regression
+// test for a page*pageSize int-overflow bug: a large enough page made the
+// multiplication wrap around to a negative start, which then panicked on
+// c.order[start:end]. An MCP client fully controls page, so this must
+// degrade to an empty result, never panic.
+func TestMemoryPerformanceClient_ListTests_LargePageNoPanic(t *testing.T) {
+	runner := newFakeRunner()
+	close(runner.proceed)
+	runner.raw = fortioRawResult(t)
+	client := newMemoryPerformanceClient(runner)
+
+	id, err := client.RunTest(context.Background(), PerformanceTestParams{
+		Name: "t", URL: "https://example.com", DurationSeconds: 1, RPS: 1, ConcurrentRequests: 1,
+	})
+	if err != nil {
+		t.Fatalf("RunTest: %v", err)
+	}
+	waitForStatus(t, client, id, StatusCompleted)
+
+	cases := []int{
+		math.MaxInt,
+		math.MaxInt / 2,
+		1_000_000_000_000_000_000,
+	}
+	for _, page := range cases {
+		page, pageSize := page, 25
+		t.Run(fmt.Sprintf("page=%d", page), func(t *testing.T) {
+			result, err := client.ListTests(context.Background(), page, pageSize)
+			if err != nil {
+				t.Fatalf("ListTests: %v", err)
+			}
+			if len(result.Tests) != 0 {
+				t.Errorf("len(Tests) = %d, want 0 for an out-of-range page", len(result.Tests))
+			}
+			if result.TotalCount != 1 {
+				t.Errorf("TotalCount = %d, want 1", result.TotalCount)
+			}
+		})
+	}
+}
+
+// TestMemoryPerformanceClient_RetentionCap verifies that tracking more than
+// maxTrackedTests completed tests evicts the oldest ones rather than
+// growing the store without bound.
+func TestMemoryPerformanceClient_RetentionCap(t *testing.T) {
+	runner := newFakeRunner()
+	close(runner.proceed)
+	runner.raw = fortioRawResult(t)
+	client := newMemoryPerformanceClient(runner)
+
+	const extra = 5
+	var ids []string
+	for i := 0; i < maxTrackedTests+extra; i++ {
+		id, err := client.RunTest(context.Background(), PerformanceTestParams{
+			Name: "t", URL: "https://example.com", DurationSeconds: 1, RPS: 1, ConcurrentRequests: 1,
+		})
+		if err != nil {
+			t.Fatalf("RunTest: %v", err)
+		}
+		ids = append(ids, id)
+		waitForStatus(t, client, id, StatusCompleted)
+	}
+
+	page, err := client.ListTests(context.Background(), 0, 1)
+	if err != nil {
+		t.Fatalf("ListTests: %v", err)
+	}
+	if page.TotalCount != maxTrackedTests {
+		t.Errorf("TotalCount = %d, want %d (capped)", page.TotalCount, maxTrackedTests)
+	}
+
+	// The oldest `extra` tests should have been evicted.
+	for _, id := range ids[:extra] {
+		if _, err := client.GetTest(context.Background(), id); err == nil {
+			t.Errorf("GetTest(%s) succeeded, want it evicted as one of the oldest entries", id)
+		}
+	}
+	// The most recent test must still be tracked.
+	if _, err := client.GetTest(context.Background(), ids[len(ids)-1]); err != nil {
+		t.Errorf("GetTest on the most recent test failed: %v", err)
+	}
+}
+
 func TestMemoryPerformanceClient_DeleteTest(t *testing.T) {
 	runner := newFakeRunner()
 	close(runner.proceed)
@@ -408,6 +494,64 @@ func TestMemoryPerformanceClient_DeleteTest(t *testing.T) {
 	}
 }
 
+// cancelAwareRunner blocks in RunLoadTest until its context is canceled,
+// then reports the context's error on done - used to verify that deleting a
+// running test actually cancels the load test's context.
+type cancelAwareRunner struct {
+	started chan struct{}
+	done    chan error
+}
+
+// newCancelAwareRunner builds a cancelAwareRunner.
+func newCancelAwareRunner() *cancelAwareRunner {
+	return &cancelAwareRunner{started: make(chan struct{}), done: make(chan error, 1)}
+}
+
+// RunLoadTest closes r.started, blocks until ctx is canceled, then reports
+// ctx.Err() on r.done and returns it as the call's error.
+func (r *cancelAwareRunner) RunLoadTest(ctx context.Context, p meshery.RunLoadTestParams) (*meshery.RawResult, error) {
+	close(r.started)
+	<-ctx.Done()
+	err := ctx.Err()
+	r.done <- err
+	return nil, err
+}
+
+// TestMemoryPerformanceClient_DeleteTest_CancelsRunning verifies that
+// deleting a still-running test cancels its context, so the client stops
+// waiting on it promptly instead of holding the connection/goroutine open
+// for the test's full remaining duration.
+func TestMemoryPerformanceClient_DeleteTest_CancelsRunning(t *testing.T) {
+	runner := newCancelAwareRunner()
+	client := newMemoryPerformanceClient(runner)
+
+	id, err := client.RunTest(context.Background(), PerformanceTestParams{
+		Name: "t", URL: "https://example.com", DurationSeconds: 300, RPS: 1, ConcurrentRequests: 1,
+	})
+	if err != nil {
+		t.Fatalf("RunTest: %v", err)
+	}
+
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunLoadTest was never called")
+	}
+
+	if err := client.DeleteTest(context.Background(), id); err != nil {
+		t.Fatalf("DeleteTest: %v", err)
+	}
+
+	select {
+	case err := <-runner.done:
+		if err != context.Canceled {
+			t.Errorf("RunLoadTest's context error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("DeleteTest did not cancel the in-flight RunLoadTest call")
+	}
+}
+
 // --- tool handlers ------------------------------------------------------------
 
 func TestRunPerformanceTestHandler_Validation(t *testing.T) {
@@ -419,14 +563,18 @@ func TestRunPerformanceTestHandler_Validation(t *testing.T) {
 	handler := runPerformanceTestHandler(client)
 
 	cases := []struct {
-		name string
-		args map[string]interface{}
+		name        string
+		args        map[string]interface{}
+		wantErrText string
 	}{
-		{"missing name", map[string]interface{}{"url": "https://example.com", "duration": float64(10), "rps": float64(10), "concurrent_requests": float64(1)}},
-		{"invalid url", map[string]interface{}{"name": "t", "url": "not-a-url", "duration": float64(10), "rps": float64(10), "concurrent_requests": float64(1)}},
-		{"zero duration", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(0), "rps": float64(10), "concurrent_requests": float64(1)}},
-		{"negative rps", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(10), "rps": float64(-1), "concurrent_requests": float64(1)}},
-		{"zero concurrent_requests", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(10), "rps": float64(10), "concurrent_requests": float64(0)}},
+		{"missing name", map[string]interface{}{"url": "https://example.com", "duration": float64(10), "rps": float64(10), "concurrent_requests": float64(1)}, "name"},
+		{"invalid url", map[string]interface{}{"name": "t", "url": "not-a-url", "duration": float64(10), "rps": float64(10), "concurrent_requests": float64(1)}, "url"},
+		{"zero duration", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(0), "rps": float64(10), "concurrent_requests": float64(1)}, "duration"},
+		{"duration too large", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(maxDurationSeconds + 1), "rps": float64(10), "concurrent_requests": float64(1)}, "duration"},
+		{"negative rps", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(10), "rps": float64(-1), "concurrent_requests": float64(1)}, "rps"},
+		{"rps too large", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(10), "rps": float64(maxRPS + 1), "concurrent_requests": float64(1)}, "rps"},
+		{"zero concurrent_requests", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(10), "rps": float64(10), "concurrent_requests": float64(0)}, "concurrent_requests"},
+		{"concurrent_requests too large", map[string]interface{}{"name": "t", "url": "https://example.com", "duration": float64(10), "rps": float64(10), "concurrent_requests": float64(maxConcurrentRequests + 1)}, "concurrent_requests"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -436,6 +584,10 @@ func TestRunPerformanceTestHandler_Validation(t *testing.T) {
 			}
 			if !res.IsError {
 				t.Fatalf("expected IsError=true for invalid input, text: %s", resultText(t, res))
+			}
+			text := resultText(t, res)
+			if !strings.Contains(text, tc.wantErrText) {
+				t.Errorf("error text = %q, want it to mention %q (checking the right field was rejected, not a coincidental failure)", text, tc.wantErrText)
 			}
 		})
 	}
@@ -579,6 +731,29 @@ func TestComparePerformanceTestsHandler_RejectsRunningTest(t *testing.T) {
 	}
 }
 
+// TestComparePerformanceTestsHandler_NotFound covers comparing against a
+// test_id that doesn't exist (e.g. it was deleted), not just one that's
+// still running.
+func TestComparePerformanceTestsHandler_NotFound(t *testing.T) {
+	client := &fakePerformanceClient{
+		getTestFunc: func(ctx context.Context, testID string) (*PerformanceTestResult, error) {
+			if testID == "a" {
+				return &PerformanceTestResult{ID: "a", Status: StatusCompleted}, nil
+			}
+			return nil, fmt.Errorf("performance test %q not found", testID)
+		},
+	}
+	handler := comparePerformanceTestsHandler(client)
+
+	res, err := handler(context.Background(), callToolRequest(map[string]interface{}{"test_id_a": "a", "test_id_b": "missing"}))
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result when comparing against a not-found test_id")
+	}
+}
+
 func TestListPerformanceTestsHandler(t *testing.T) {
 	client := &fakePerformanceClient{
 		listTestsFunc: func(ctx context.Context, page, pageSize int) (*PerformanceTestPage, error) {
@@ -597,6 +772,64 @@ func TestListPerformanceTestsHandler(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, res))
 	}
+}
+
+// TestListPerformanceTestsHandler_Validation covers the bounds checks that
+// were previously untested: a negative page, a non-positive page_size, and
+// an oversized page_size getting clamped to maxPageSize rather than passed
+// through as-is.
+func TestListPerformanceTestsHandler_Validation(t *testing.T) {
+	t.Run("negative page", func(t *testing.T) {
+		client := &fakePerformanceClient{
+			listTestsFunc: func(ctx context.Context, page, pageSize int) (*PerformanceTestPage, error) {
+				t.Fatal("ListTests should not be called for a negative page")
+				return nil, nil
+			},
+		}
+		res, err := listPerformanceTestsHandler(client)(context.Background(), callToolRequest(map[string]interface{}{"page": float64(-1)}))
+		if err != nil {
+			t.Fatalf("handler returned Go error: %v", err)
+		}
+		if !res.IsError {
+			t.Fatal("expected error result for a negative page")
+		}
+	})
+
+	t.Run("zero page_size", func(t *testing.T) {
+		client := &fakePerformanceClient{
+			listTestsFunc: func(ctx context.Context, page, pageSize int) (*PerformanceTestPage, error) {
+				t.Fatal("ListTests should not be called for a zero page_size")
+				return nil, nil
+			},
+		}
+		res, err := listPerformanceTestsHandler(client)(context.Background(), callToolRequest(map[string]interface{}{"page_size": float64(0)}))
+		if err != nil {
+			t.Fatalf("handler returned Go error: %v", err)
+		}
+		if !res.IsError {
+			t.Fatal("expected error result for a zero page_size")
+		}
+	})
+
+	t.Run("oversized page_size is clamped", func(t *testing.T) {
+		var gotPageSize int
+		client := &fakePerformanceClient{
+			listTestsFunc: func(ctx context.Context, page, pageSize int) (*PerformanceTestPage, error) {
+				gotPageSize = pageSize
+				return &PerformanceTestPage{Page: page, PageSize: pageSize}, nil
+			},
+		}
+		res, err := listPerformanceTestsHandler(client)(context.Background(), callToolRequest(map[string]interface{}{"page_size": float64(1_000_000)}))
+		if err != nil {
+			t.Fatalf("handler returned Go error: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("unexpected error result: %s", resultText(t, res))
+		}
+		if gotPageSize != maxPageSize {
+			t.Errorf("page_size passed to client = %d, want it clamped to %d", gotPageSize, maxPageSize)
+		}
+	})
 }
 
 func TestDeletePerformanceTestHandler(t *testing.T) {
@@ -626,5 +859,25 @@ func TestDeletePerformanceTestHandler(t *testing.T) {
 	}
 	if body["deleted"] != true {
 		t.Errorf("deleted = %v, want true", body["deleted"])
+	}
+}
+
+// TestDeletePerformanceTestHandler_Error covers the client rejecting the
+// delete (e.g. an unknown test_id) - previously only the success path was
+// exercised at the handler level.
+func TestDeletePerformanceTestHandler_Error(t *testing.T) {
+	client := &fakePerformanceClient{
+		deleteTestFunc: func(ctx context.Context, testID string) error {
+			return fmt.Errorf("performance test %q not found", testID)
+		},
+	}
+	handler := deletePerformanceTestHandler(client)
+
+	res, err := handler(context.Background(), callToolRequest(map[string]interface{}{"test_id": "missing"}))
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result when the client rejects the delete")
 	}
 }

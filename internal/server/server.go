@@ -11,7 +11,11 @@ import (
 
 // New builds a Meshery MCP server with every tool surface registered.
 func New() (*server.MCPServer, error) {
-	s := server.NewMCPServer(version.Name, version.Version)
+	// WithRecovery keeps a panic in one tool call (a bug we failed to
+	// catch, or a future tool we haven't hardened yet) from taking down
+	// the whole process, which would otherwise drop every other in-flight
+	// or future tool call in this stdio session.
+	s := server.NewMCPServer(version.Name, version.Version, server.WithRecovery())
 
 	registry := NewRegistry(
 		RegistrantFunc(func(s *server.MCPServer) error {
