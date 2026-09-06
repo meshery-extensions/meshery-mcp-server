@@ -1,0 +1,16 @@
+# Version control
+.git
+.gitignore
+
+# Build artifacts
+bin
+coverage.txt
+
+# Local environment and secret files
+.env
+.env.*
+*.env
+!.env.example
+
+# Docs
+README.md
