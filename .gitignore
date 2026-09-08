@@ -18,19 +18,6 @@ go.work.sum
 # env file
 .env
 
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Test binary, build with `go test -c`
-*.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
-
 # UI
 **/node_modules/
 **/out/
@@ -55,12 +42,11 @@ dist/**
 
 # IDE
 **/.idea
-.vscode/** */
-.cusorignore
+.vscode/
+.cursorignore
 *.config
 
 # Meshery
 **errorutil_analyze_errors.json
 **errorutil_analyze_summary.json
 **errorutil_errors_export.json
-
