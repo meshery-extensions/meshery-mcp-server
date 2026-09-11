@@ -3,6 +3,32 @@
     <div>
         <img src="https://raw.githubusercontent.com/meshery-extensions/.github/master/profile/assets/img/meshery-extensions-github.png" usemap="#workmap"  />
     </div>
+
+## Meshery MCP Server
+
+The **Meshery MCP Server** exposes Meshery's capabilities to AI assistants through the [Model Context Protocol](https://modelcontextprotocol.io). It runs as a Go binary that speaks MCP over stdio and is being prepared to connect to a running [Meshery Server](https://meshery.io).
+
+> **Status: scaffold.** The project is in its early stages. The Go module, MCP server entrypoint (stdio transport), configuration, and CI are in place. Tooling that integrates with the Meshery REST API is being built incrementally.
+
+### Current scope
+
+- MCP server over stdio, built with the [`mcp-go`](https://github.com/mark3labs/mcp-go) SDK.
+- `server_info` tool returning server metadata.
+- Environment-driven configuration: `MESHERY_SERVER_URL` (default `http://localhost:9081`) and `MESHERY_API_TOKEN`.
+
+### Getting started
+
+```sh
+make build
+make run
+```
+
+Requires Go 1.26+.
+
+### Contributing
+
+Contributions are welcome. See the [contributing guide](https://github.com/meshery/meshery/blob/master/CONTRIBUTING.md) and the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md).
+
     <!-- Overview section -->
     <div align="center">
         <h3>Meshery is an extensible, self-service engineering plaform for the collaborative management of cloud and cloud native infrastructure.</h3>
@@ -66,7 +92,7 @@ This organization is managed by Meshery core and extension maintainers. Reposito
     <h2>Community and Contributing</h2>
     <p>Please do! Code and non-code contributions are welcome. This project is community-built and fosters collaboration. Contributors are expected to adhere to the <a href="https://github.com/cncf/foundation/blob/main/code-of-conduct.md"> CNCF Code of Conduct</a>.
     </p>
-    <p>Jump into our <a href="https://slack.meshery.io">Slack</a>! Submit your <a href="https://meshery.io/newcomers">community member form</a> access to additional resources. Don't forget to join the <a href="https://meshery.io/calendar">Newcomers meeting</a> held every Thursday!
+    <p>Jump into our <a href="https://slack.meshery.io">Slack</a>! Submit your <a href="https://meshery.io/newcomers">community member form</a> to access additional resources. Don't forget to join the <a href="https://meshery.io/calendar">Newcomers meeting</a> held every Thursday!
     </p>
     <img src="https://raw.githubusercontent.com/meshery/meshery/refs/heads/master/.github/assets/images/readme/community.png"
         style="margin:10px;" width="180px" alt="Community" align="right" />
@@ -86,4 +112,4 @@ This organization is managed by Meshery core and extension maintainers. Reposito
     </ul>
 </div>
 <!-- Footer Section -->
-<img src="https://raw.githubusercontent.com/meshery/.github/master/profile/assets/img/footer.png" align="center" />
+<img src="https://raw.githubusercontent.com/meshery/.github/master/profile/assets/img/footer.png" alt="Meshery footer" align="center" />
