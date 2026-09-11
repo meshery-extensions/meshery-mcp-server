@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meshery MCP Server — Live Playground</title>
+<style>
+body{font-family:system-ui, sans-serif; max-width:900px; margin:2rem auto; padding:0 1rem; line-height:1.6}
+pre{background:#f5f5f5; padding:1rem; overflow:auto; border-radius:6px}
+button{padding:0.6rem 1rem; margin:0.3rem; cursor:pointer}
+#log{white-space:pre-wrap; background:#0a0a0a; color:#aaffaa; padding:1rem; border-radius:6px; min-height:200px}
+</style>
+</head>
+<body>
+<h1>Meshery MCP Server — Live Playground</h1>
+<p>Try the server without cloning. This page talks to the hosted MCP endpoint over streamable HTTP.</p>
+<p><a href="/bench/">View Benchmark Scorecard</a> | <a href="https://github.com/meshery-extensions/meshery-mcp-server">GitHub</a></p>
+<button onclick="callTool('list_designs', {})">List Designs</button>
+<button onclick="callTool('server_info', {})">Server Info</button>
+<button onclick="readTopology()">Read Topology</button>
+<pre id="log">Ready. Click a button to call the MCP server.</pre>
+<script>
+const endpoint = "/mcp";
+async function callTool(name, args) {
+  const body = {jsonrpc:"2.0", id: Date.now(), method:"tools/call", params:{name, arguments: args}};
+  log("→ " + JSON.stringify(body, null, 2));
+  try {
+    const res = await fetch(endpoint, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    const j = await res.json();
+    log("← " + JSON.stringify(j, null, 2));
+  } catch(e){ log("Error: " + e); }
+}
+async function readTopology(){
+  const body = {jsonrpc:"2.0", id: Date.now(), method:"resources/read", params:{uri:"meshery://clusters/local/topology"}};
+  log("→ " + JSON.stringify(body, null, 2));
+  try {
+    const res = await fetch(endpoint, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    const j = await res.json();
+    log("← " + JSON.stringify(j, null, 2));
+  } catch(e){ log("Error: " + e); }
+}
+function log(m){ const el=document.getElementById("log"); el.textContent += "\n" + m; el.scrollTop=el.scrollHeight; }
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architectural Ruler — 10-Metric Scorecard</title>
+<style>
+body{font-family:system-ui, sans-serif; max-width:1100px; margin:2rem auto; padding:0 1rem}
+table{border-collapse:collapse; width:100%; margin:1rem 0}
+th,td{border:1px solid #ddd; padding:0.6rem; text-align:left; font-size:0.9rem}
+th{background:#f0f0f0}
+.breach{color:#c00; font-weight:bold}
+.win{background:#e6ffe6}
+pre{background:#f5f5f5; padding:1rem; overflow:auto}
+</style>
+</head>
+<body>
+<h1>Meshery MCP Server: Architectural Ruler Scorecard</h1>
+<p>Version 1.0.0 | Spec MCP 2026-07-28 | Run <code>make ruler</code> to reproduce. Micro-benchmark is 50k JSON-RPC tools/call round-trips for list_designs.</p>
+<div id="bench"></div>
+<table id="scorecard">
+<thead><tr><th>ID</th><th>Metric</th><th>Unit</th><th>Threshold</th><th>Standalone</th><th>Adapter</th><th>Hybrid</th><th>Superiority</th></tr></thead>
+<tbody></tbody>
+</table>
+<p>Superiority is standalone advantage over adapter. For lower_is_better: (adapter - standalone)/adapter, for higher_is_better: (standalone - adapter)/standalone.</p>
+<pre id="micro"></pre>
+<p><a href="/">Back to Playground</a> | <a href="https://github.com/meshery-extensions/meshery-mcp-server">GitHub</a> | <a href="https://github.com/AkashNaickar/meshery-mcp-demo">POC Demo</a></p>
+<script>
+fetch("scorecard.json").then(r=>r.json()).then(sc=>{
+  const tb=document.querySelector("#scorecard tbody");
+  sc.metrics.forEach(m=>{
+    const sup = m.direction==="lower_is_better" ? ((m.adapter - m.standalone)/m.adapter*100) : ((m.standalone - m.adapter)/m.standalone*100);
+    const tr=document.createElement("tr");
+    const breach = (v)=> m.direction==="lower_is_better" ? v>m.threshold : v<m.threshold;
+    tr.innerHTML=`<td>${m.id}</td><td>${m.name}</td><td>${m.unit}</td><td>${m.threshold}</td><td class="${breach(m.standalone)?"breach":"win"}">${m.standalone}</td><td class="${breach(m.adapter)?"breach":""}">${m.adapter}</td><td>${m.hybrid}</td><td>${sup.toFixed(1)}%</td>`;
+    tb.appendChild(tr);
+  });
+  document.getElementById("micro").textContent = `Scorecard: ${sc.title} v${sc.version} | ${sc.spec}\nAverage standalone superiority: ${(sc.metrics.reduce((a,m)=>a+(m.direction==="lower_is_better" ? (m.adapter-m.standalone)/m.adapter : (m.standalone-m.adapter)/m.standalone),0)/sc.metrics.length*100).toFixed(1)}%`;
+}).catch(e=>{document.getElementById("micro").textContent="Failed to load scorecard.json: "+e;});
+</script>
+</body>
+</html>

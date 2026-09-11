@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: meshery-mcp-server
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: MESHERY_MCP_TRANSPORT
+        value: http
+      - key: MESHERY_MCP_HTTP_ADDR
+        value: 0.0.0.0:10000
+      - key: MESHERY_SERVER_URL
+        sync: false
+      - key: MESHERY_API_TOKEN
+        sync: false
+    # Render free sleeps after 15 min. Keep alive via external ping every 10 min.
+    # See cron-job.org setup below.

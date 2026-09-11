@@ -1,8 +1,18 @@
-run:
-  timeout: 5m
+version: "2"
 
-issues:
-  exclude-files:
-    - server/handlers/doc.go
-    - server/models/meshmodel/core/register.go
- 
+run:
+  timeout: 10m
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
