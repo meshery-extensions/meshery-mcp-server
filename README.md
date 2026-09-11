@@ -3,6 +3,32 @@
     <div>
         <img src="https://raw.githubusercontent.com/meshery-extensions/.github/master/profile/assets/img/meshery-extensions-github.png" usemap="#workmap"  />
     </div>
+
+## Meshery MCP Server
+
+The **Meshery MCP Server** exposes Meshery's capabilities to AI assistants through the [Model Context Protocol](https://modelcontextprotocol.io). It runs as a Go binary that speaks MCP over stdio and is being prepared to connect to a running [Meshery Server](https://meshery.io).
+
+> **Status: scaffold.** The project is in its early stages. The Go module, MCP server entrypoint (stdio transport), configuration, and CI are in place. Tooling that integrates with the Meshery REST API is being built incrementally.
+
+### Current scope
+
+- MCP server over stdio, built with the [`mcp-go`](https://github.com/mark3labs/mcp-go) SDK.
+- `server_info` tool returning server metadata.
+- Environment-driven configuration: `MESHERY_SERVER_URL` (default `http://localhost:9081`) and `MESHERY_API_TOKEN`.
+
+### Getting started
+
+```sh
+make build
+make run
+```
+
+Requires Go 1.26+.
+
+### Contributing
+
+Contributions are welcome. See the [contributing guide](https://github.com/meshery/meshery/blob/master/CONTRIBUTING.md) and the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md).
+
     <!-- Overview section -->
     <div align="center">
         <h3>Meshery is an extensible, self-service engineering plaform for the collaborative management of cloud and cloud native infrastructure.</h3>
