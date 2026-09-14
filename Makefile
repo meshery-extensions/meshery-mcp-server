@@ -489,3 +489,10 @@ ifeq (,$(findstring $(GOVERSION), $(INSTALLED_GO_VERSION)))
 #	 Required golang version is: 'go$(GOVERSION).x'. \
 #	 Ensure go '$(GOVERSION).x' is installed and available in your 'PATH'.)
 endif
+
+.PHONY: test-integration
+test-integration:
+	@echo "Running local automated test harness validations..."
+	go test -v ./internal/meshery/...
+
+
