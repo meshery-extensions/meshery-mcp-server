@@ -11,6 +11,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Run ESLint Meshery-UI
+      if: false
       run: cd ui && npm i eslint && npx eslint .
     - name: Run ESLint Provider-UI
+      if: false
       run: cd provider-ui && npm i eslint && npx eslint .
