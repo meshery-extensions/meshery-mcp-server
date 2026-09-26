@@ -30,6 +30,7 @@ type mesheryClient struct {
 // NewClient returns a new Meshery API client instance with optional token and provider authentication values.
 // Usage: NewClient(baseURL, [token], [provider])
 func NewClient(baseURL string, args ...string) Client {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		baseURL = "http://localhost:9081"
 	}
@@ -58,8 +59,9 @@ func NewClient(baseURL string, args ...string) Client {
 
 // ListDesigns retrieves available design patterns from Meshery Server /api/pattern endpoint with 0-indexed pagination & search.
 func (c *mesheryClient) ListDesigns(ctx context.Context, page, pageSize int, search string) ([]map[string]interface{}, int, error) {
-	baseURL := fmt.Sprintf("%s/api/pattern", c.baseURL)
-	u, err := url.Parse(baseURL)
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/pattern", cleanBaseURL)
+	u, err := url.Parse(endpointURL)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to parse list_designs endpoint URL: %w", err)
 	}

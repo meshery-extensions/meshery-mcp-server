@@ -4,6 +4,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/meshery-extensions/meshery-mcp-server/internal/meshery"
 	"github.com/meshery-extensions/meshery-mcp-server/pkg/security"
@@ -57,18 +58,12 @@ func (t *ListDesignsTool) Execute(ctx context.Context, params map[string]interfa
 	search := ""
 
 	if params != nil {
-		if p, ok := params["page"].(float64); ok {
-			page = int(p)
-		} else if pInt, ok := params["page"].(int); ok {
-			page = pInt
+		if val, ok := params["page"]; ok {
+			page = parseNumericInt(val, 0)
 		}
-
-		if ps, ok := params["pageSize"].(float64); ok {
-			pageSize = int(ps)
-		} else if psInt, ok := params["pageSize"].(int); ok {
-			pageSize = psInt
+		if val, ok := params["pageSize"]; ok {
+			pageSize = parseNumericInt(val, 10)
 		}
-
 		if s, ok := params["search"].(string); ok {
 			search = s
 		}
@@ -102,4 +97,24 @@ func (t *ListDesignsTool) Execute(ctx context.Context, params map[string]interfa
 		"total_count": totalCount,
 		"designs":     sanitizedDesigns,
 	}, nil
+}
+
+func parseNumericInt(val interface{}, defaultVal int) int {
+	switch v := val.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case int32:
+		return int(v)
+	case float64:
+		return int(v)
+	case float32:
+		return int(v)
+	case string:
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return defaultVal
 }
