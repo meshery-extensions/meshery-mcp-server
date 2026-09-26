@@ -53,7 +53,13 @@ func (t *ListDesignsTool) Schema() map[string]interface{} {
 }
 
 // Execute queries Meshery API, validates pagination bounds, and returns response-boundary sanitized design objects.
-func (t *ListDesignsTool) Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
+func (t *ListDesignsTool) Execute(ctx context.Context, params map[string]interface{}) (res map[string]interface{}, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("list_designs execution recovered from panic: %v", r)
+		}
+	}()
+
 	page := 0
 	pageSize := 10
 	search := ""

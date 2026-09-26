@@ -73,7 +73,12 @@ var allowedExceptions = map[string]bool{
 
 // SanitizeMap deeply copies and redacts sensitive information from map hierarchies.
 // It tracks visited pointer references to prevent infinite recursion on cyclic data structures.
-func SanitizeMap(input map[string]interface{}) map[string]interface{} {
+func SanitizeMap(input map[string]interface{}) (res map[string]interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			res = map[string]interface{}{"error": "[REDACTED_DUE_TO_SANITY_RECOVERY]"}
+		}
+	}()
 	visited := make(map[uintptr]bool)
 	return sanitizeMapInternal(input, visited, 0)
 }
@@ -119,7 +124,13 @@ func sanitizeMapInternal(input map[string]interface{}, visited map[uintptr]bool,
 }
 
 // SanitizeJSON parses raw JSON, scrubs sensitive keys, and returns sanitized JSON bytes.
-func SanitizeJSON(rawJSON []byte) ([]byte, error) {
+func SanitizeJSON(rawJSON []byte) (res []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			res = []byte(RedactedPlaceholder)
+			err = nil
+		}
+	}()
 	if len(rawJSON) == 0 {
 		return rawJSON, nil
 	}
@@ -137,7 +148,12 @@ func SanitizeJSON(rawJSON []byte) ([]byte, error) {
 
 // SanitizeString scrubs sensitive token or credential patterns from error messages and log outputs.
 // If input is valid JSON, it routes through SanitizeJSON. Malformed braced input falls back safely without recursion.
-func SanitizeString(input string) string {
+func SanitizeString(input string) (res string) {
+	defer func() {
+		if r := recover(); r != nil {
+			res = RedactedPlaceholder
+		}
+	}()
 	if input == "" {
 		return input
 	}
