@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/meshery-extensions/meshery-mcp-server/internal/meshery"
 	"github.com/meshery-extensions/meshery-mcp-server/pkg/security"
@@ -65,7 +66,18 @@ func (t *ListDesignsTool) Execute(ctx context.Context, params map[string]interfa
 			pageSize = parseNumericInt(val, 10)
 		}
 		if s, ok := params["search"].(string); ok {
-			search = s
+			// Limit search parameter length to prevent buffer allocation & denial of service attacks
+			if len(s) > 256 {
+				s = s[:256]
+			}
+			// Strip control characters (\r, \n, \x00) to prevent log injection
+			s = strings.Map(func(r rune) rune {
+				if r < 32 && r != '\t' {
+					return -1
+				}
+				return r
+			}, s)
+			search = strings.TrimSpace(s)
 		}
 	}
 

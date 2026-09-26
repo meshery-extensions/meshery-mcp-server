@@ -150,10 +150,11 @@ func TestSanitizeMap_NestedStructures(t *testing.T) {
 	input := map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"name": "meshery-design",
-			"credentials": map[string]interface{}{
+			"auth_config": map[string]interface{}{
 				"kubeconfig": "apiVersion: v1...",
 				"api_key":    "key-12345",
 			},
+			"credentials": "secret_credential_blob",
 		},
 		"endpoints": []interface{}{
 			map[string]interface{}{
@@ -166,13 +167,17 @@ func TestSanitizeMap_NestedStructures(t *testing.T) {
 	sanitized := SanitizeMap(input)
 
 	metadata := sanitized["metadata"].(map[string]interface{})
-	creds := metadata["credentials"].(map[string]interface{})
+	creds := metadata["auth_config"].(map[string]interface{})
 
 	if creds["kubeconfig"] != RedactedPlaceholder {
 		t.Errorf("expected kubeconfig to be redacted, got %v", creds["kubeconfig"])
 	}
 	if creds["api_key"] != RedactedPlaceholder {
 		t.Errorf("expected api_key to be redacted, got %v", creds["api_key"])
+	}
+
+	if metadata["credentials"] != RedactedPlaceholder {
+		t.Errorf("expected credentials field to be redacted, got %v", metadata["credentials"])
 	}
 
 	endpoints := sanitized["endpoints"].([]interface{})

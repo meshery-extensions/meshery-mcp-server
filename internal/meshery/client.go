@@ -3,6 +3,7 @@ package meshery
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,6 +50,15 @@ func NewClient(baseURL string, args ...string) Client {
 		provider: p,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+				},
+				MaxIdleConns:          100,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				// Prevent automatic redirects to HTML provider login pages on unauthenticated API calls
 				return http.ErrUseLastResponse
