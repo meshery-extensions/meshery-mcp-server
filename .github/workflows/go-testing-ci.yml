@@ -26,7 +26,7 @@ jobs:
         go: [1.23]
         os: [ubuntu-24.04]
     name: golangci-lint
-    if: github.repository == 'meshery/meshery'
+    if: github.repository == 'meshery-extensions/meshery-mcp-server' || github.repository == 'meshery/meshery'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/setup-go@v5
@@ -41,7 +41,6 @@ jobs:
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-24.04
-    needs: golangci
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,11 +50,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.23"
       - name: Run coverage
         run: go test --short ./... -race -coverprofile=coverage.txt -covermode=atomic
       - name: Upload coverage to Codecov
-        if: github.repository == 'meshery/meshery'
+        if: github.repository == 'meshery-extensions/meshery-mcp-server' || github.repository == 'meshery/meshery'
         uses: codecov/codecov-action@v4.3.0
         with:
           files: ./coverage.txt
@@ -63,7 +62,6 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-24.04
-    needs: golangci
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,21 +84,25 @@ jobs:
           cluster_name: "kind-cluster"
       - name: Run coverage
         run: |
-          cd mesheryctl;
-          make; 
-          ./mesheryctl system start -p docker;
-          ./mesheryctl system update -y;
-          ./mesheryctl system status -y;
-          ./mesheryctl system restart -y;
-          ./mesheryctl system check --preflight;  
-          ./mesheryctl system stop -y;
-          echo "Running Mesheryctl with Docker completed."
-        
-          ./mesheryctl system start -p kubernetes;
-          ./mesheryctl system update -y;
-          ./mesheryctl system status -y;
-          ./mesheryctl system restart -y;
-          ./mesheryctl system check --preflight;
-          ./mesheryctl system stop -y;
-          echo "Running Mesheryctl with Kubernetes completed."
+          if [ -d "mesheryctl" ]; then
+            cd mesheryctl;
+            make; 
+            ./mesheryctl system start -p docker;
+            ./mesheryctl system update -y;
+            ./mesheryctl system status -y;
+            ./mesheryctl system restart -y;
+            ./mesheryctl system check --preflight;  
+            ./mesheryctl system stop -y;
+            echo "Running Mesheryctl with Docker completed."
+          
+            ./mesheryctl system start -p kubernetes;
+            ./mesheryctl system update -y;
+            ./mesheryctl system status -y;
+            ./mesheryctl system restart -y;
+            ./mesheryctl system check --preflight;
+            ./mesheryctl system stop -y;
+            echo "Running Mesheryctl with Kubernetes completed."
+          else
+            echo "No mesheryctl directory present, skipping mesheryctl integration tests."
+          fi
 
