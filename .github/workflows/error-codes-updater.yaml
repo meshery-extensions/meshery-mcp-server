@@ -14,7 +14,7 @@ on:
 jobs:
   Update-error-codes:
     name: Error codes utility
-    if: github.repository == 'meshery/meshery'
+    if: github.repository == 'meshery-extensions/meshery-mcp-server' || github.repository == 'meshery/meshery'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@master
@@ -40,22 +40,30 @@ jobs:
 
       - name: Run Utility For Meshery Server
         run: |
-          ~/errorutil update -d . -i ./server/helpers -o ./server/helpers --skip-dirs mesheryctl
-          output=$(~/errorutil -d . analyze -i ./server/helpers -o ./server/helpers --skip-dirs mesheryctl | wc -c)
-          if [ "$output" -ne 0 ]; then
-            exit 1
+          if [ -d "./server/helpers" ]; then
+            ~/errorutil update -d . -i ./server/helpers -o ./server/helpers --skip-dirs mesheryctl
+            output=$(~/errorutil -d . analyze -i ./server/helpers -o ./server/helpers --skip-dirs mesheryctl | wc -c)
+            if [ "$output" -ne 0 ]; then
+              exit 1
+            fi
+            echo '{ "errors_export": "" }' | jq --slurpfile export ./server/helpers/errorutil_errors_export.json '.errors_export = $export[0]' > ./docs/_data/errorref/meshery-server_errors_export.json
+          else
+            echo "No server/helpers directory present, skipping."
           fi
-          echo '{ "errors_export": "" }' | jq --slurpfile export ./server/helpers/errorutil_errors_export.json '.errors_export = $export[0]' > ./docs/_data/errorref/meshery-server_errors_export.json
 
       - name: Run Utility For Mesheryctl
         run: |
-          cd ./mesheryctl
-          ~/errorutil update -d . -i ./helpers -o ./helpers
-          output=$(~/errorutil -d . analyze -i ./helpers -o ./helpers | wc -c)
-          if [ "$output" -ne 0 ]; then
-            exit 1
+          if [ -d "./mesheryctl" ]; then
+            cd ./mesheryctl
+            ~/errorutil update -d . -i ./helpers -o ./helpers
+            output=$(~/errorutil -d . analyze -i ./helpers -o ./helpers | wc -c)
+            if [ "$output" -ne 0 ]; then
+              exit 1
+            fi
+            echo '{ "errors_export": "" }' | jq --slurpfile export ../server/helpers/errorutil_errors_export.json '.errors_export = $export[0]' > ../docs/_data/errorref/mesheryctl_errors_export.json
+          else
+            echo "No mesheryctl directory present, skipping."
           fi
-          echo '{ "errors_export": "" }' | jq --slurpfile export ../server/helpers/errorutil_errors_export.json '.errors_export = $export[0]' > ../docs/_data/errorref/mesheryctl_errors_export.json
 
       - name: Pull changes from remote
         run: git pull origin master
