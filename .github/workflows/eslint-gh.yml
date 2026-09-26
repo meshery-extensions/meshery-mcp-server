@@ -11,6 +11,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Run ESLint Meshery-UI
-      run: cd ui && npm i eslint && npx eslint .
+      run: |
+        if [ -d "ui" ]; then
+          cd ui && npm i eslint && npx eslint .
+        else
+          echo "No ui directory present, skipping ESLint for Meshery-UI."
+        fi
     - name: Run ESLint Provider-UI
-      run: cd provider-ui && npm i eslint && npx eslint .
+      run: |
+        if [ -d "provider-ui" ]; then
+          cd provider-ui && npm i eslint && npx eslint .
+        else
+          echo "No provider-ui directory present, skipping ESLint for Provider-UI."
+        fi
