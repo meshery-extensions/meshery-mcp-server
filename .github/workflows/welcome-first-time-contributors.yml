@@ -1,0 +1,100 @@
+name: Welcome First-Time Contributors
+
+on:
+  issues:
+    types: [opened]
+# `pull_request_target` is used so the workflow can comment on PRs from forks.
+# This is safe because the workflow never checks out or runs the PR's code; it
+# only calls the GitHub API to post a comment.
+  pull_request_target:
+    types: [opened]
+
+
+# Least-privilege permissions: only issue/PR comments are written.
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome:
+    name: Welcome First-Time Contributor
+    if: github.repository == 'meshery-extensions/meshery-mcp-server'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 🔍 Introspect Context
+        run: |
+          echo "::group::Workflow Context"
+          echo "Actor       : ${{ github.actor }}"
+          echo "Event Name  : ${{ github.event_name }}"
+          echo "Repository  : ${{ github.repository }}"
+          echo "::endgroup::"
+
+      - name: 🎉 Welcome First-Time Issue Author
+        if: github.event_name == 'issues'
+        uses: actions/first-interaction@v3
+        with:
+          issue_message: |
+            👋 **Welcome to the Meshery MCP Server, @${{ github.actor }}!**
+
+            Thank you for opening your first issue — we're glad you're here! 🚀
+
+            The Meshery MCP Server is a [Meshery Extension](https://meshery.io/extensions) that lets AI assistants create and manage Meshery designs through the [Model Context Protocol](https://modelcontextprotocol.io). Here are a few ways to get connected:
+
+            ---
+
+            📅 **Join our Weekly Community Meeting**
+            Anyone can join, ask questions, share ideas, and pair with maintainers. New contributors are especially welcome!
+            👉 **[Add to calendar & join at meet.meshery.io](https://meet.meshery.io)**
+
+            💬 **Join the Meshery Community Slack**
+            The fastest way to get help, share ideas, or just say hi.
+            👉 **[Join Slack at slack.meshery.io](https://slack.meshery.io)**
+
+            🌟 **Become a Community Member**
+            Fill in our newcomer form to introduce yourself and unlock additional resources.
+            👉 **[Newcomer form at meshery.io/newcomer](https://meshery.io/newcomer)**
+
+            ---
+
+            A maintainer will review your issue shortly. In the meantime, feel free to explore the [contributing guide](https://docs.meshery.io/project/contributing).
+
+      - name: 🎉 Welcome First-Time PR Author
+        if: github.event_name == 'pull_request_target'
+        uses: actions/first-interaction@v3
+        with:
+          pr_message: |
+            👋 **Welcome to the Meshery MCP Server, @${{ github.actor }}!**
+
+            Thank you for opening your first pull request — we're excited to review your contribution! 🚀
+
+            A few things that will help your PR get merged smoothly:
+
+            - ✅ **DCO sign-off** — make sure every commit is signed off (`git commit -s`) as required by the [Developer Certificate of Origin](https://docs.meshery.io/project/contributing/contributing-github#signing-off-on-commits-developer-certificate-of-origin).
+            - 🧪 **Tests** — if your change affects an MCP tool, resource, or prompt, please include or update tests (`go test ./...`).
+            - 📝 **Description** — a clear PR description, with example MCP requests/responses where relevant, helps reviewers understand your intent quickly.
+
+            ---
+
+            📅 **Join our Weekly Community Meeting**
+            A great place to walk through your PR with a maintainer or ask questions.
+            👉 **[Add to calendar & join at meet.meshery.io](https://meet.meshery.io)**
+
+            💬 **Join the Meshery Community Slack**
+            Connect with other contributors and get real-time help.
+            👉 **[Join Slack at slack.meshery.io](https://slack.meshery.io)**
+
+            ---
+
+            A maintainer will review your PR shortly. Thank you for contributing! 🎊
+
+      - name: 🚨 Alert on Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v4.0.0
+        continue-on-error: true
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            channel: CLDRKJZ0T
+            text: ":warning: *Welcome Workflow Failed*\n\nThe `welcome-first-time-contributors` workflow in `${{ github.repository }}` failed for actor `${{ github.actor }}` on event `${{ github.event_name }}`.\n\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run logs>"

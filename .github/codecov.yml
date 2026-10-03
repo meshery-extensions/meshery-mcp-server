@@ -2,44 +2,24 @@ codecov:
   require_ci_to_pass: yes
 
 github_checks:
-    annotations: true #Annotations for Pull Request
+  annotations: true
+
 coverage:
   precision: 2
   round: down
-  range: "0...30"
+  range: "50...90"
   status:
-    patch: true #GitHub Checks and annotations for the patch status are enabled by default for all GitHub users.
+    patch: true
     project:
-      # These flags should match with those in the Github Action ci.yml
-      front-end-integration-tests:
-        flags:
-          - integrationtests
-      front-end-e2e-tests:
-        flags:
-          - e2etests
+      # Flags should match those passed to codecov/codecov-action in CI
       backend:
         flags:
           - unittests
 
 flags:
-  # Filter the folders to be measured by each flag
-  # front-end-integration-tests:
-  #   paths:
-  #      - ui/cypress/integration/integration
-  #   carryforward: true
-  # front-end-e2e-tests:
-  #   paths:
-  #      - ui/cypress/integration/e2e
-  #   carryforward: true
-  backend:
+  unittests:
     paths:
-    # Accepts only glob patterns, not regex
-      - "*/cmd/**"
-      - "*/handlers/**"
-      - "*/helpers/**"
-      - "*/internal/**"
-      - "*/mesheryctl/**" 
-      - "*/meshes/**"
-      - "*/models/**"
-      - "*/router/**"
+      # Accepts only glob patterns, not regex
+      - "internal/**"
+      - "cmd/**"
     carryforward: true

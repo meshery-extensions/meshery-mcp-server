@@ -1,21 +1,37 @@
-name-template: 'Meshery v$NEXT_PATCH_VERSION'
-tag-template: 'v$NEXT_PATCH_VERSION'
+# Release notes are drafted here and published by GoReleaser (see workflows/release.yml).
+# The draft's name must match GoReleaser's `release.name_template` so GoReleaser can
+# attach binaries to this draft instead of creating a second release.
+name-template: 'Meshery MCP Server v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+# The next version is resolved from the labels of the PRs merged since the last release.
+version-resolver:
+  major:
+    labels:
+      - 'release/major'
+  minor:
+    labels:
+      - 'kind/feature'
+      - 'kind/enhancement'
+  patch:
+    labels:
+      - 'kind/fix'
+      - 'kind/bugfix'
+      - 'kind/bug'
+      - 'kind/chore'
+  default: patch
 categories:
   - title: '🚀 Features'
     labels:
       - 'kind/feature'
       - 'kind/enhancement'
-  - title: '⌨️ Meshery CLI'
+  - title: '🛠 MCP Tools, Resources, Prompts'
     labels:
-      - 'component/mesheryctl'
-  - title: '🖥 Meshery UI'
+      - 'component/tools'
+      - 'component/resources'
+      - 'component/prompts'
+  - title: '🔌 Meshery Client'
     labels:
-      - 'component/ui'
-  - title: '🔋 Patterns, Filters, Applications'
-    labels:
-      - 'component/patterns'
-      - 'component/applications'
-      - 'component/filters'      
+      - 'component/meshery-client'
   - title: '🐛 Bug Fixes'
     labels:
       - 'kind/fix'
@@ -29,7 +45,7 @@ categories:
   - title: 📖 Documentation
     label: area/docs
   - title: 🔒 Security
-    label: security  
+    label: security
 change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
 template: |
   ## What's New
@@ -44,16 +60,6 @@ autolabeler:
   - label: 'area/docs'
     branch:
       - '/docs/'
-  - label: 'area/ci'    
-    branch:
-      - '/.github/'
-  - label: 'component/ui'
-    branch:
-      - '/ui/'
-      - '/provider-ui/'
-  - label: 'component/mesheryctl'
-    branch:
-      - '/mesheryctl/'
-  - label: 'area/lifecycle'
-    branch:
-      - '/install/'
+  - label: 'area/ci'
+    files:
+      - '.github/**'

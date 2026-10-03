@@ -1,0 +1,64 @@
+name: Build and Test
+on:
+  push:
+    branches:
+      - "master"
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - ".golangci.yml"
+      - ".github/workflows/build-and-test.yml"
+  pull_request:
+    branches:
+      - "master"
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - ".golangci.yml"
+      - ".github/workflows/build-and-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14
+          args: --config=.golangci.yml --timeout=10m
+
+  test:
+    name: Build and unit tests
+    runs-on: ubuntu-24.04
+    needs: lint
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - name: Build
+        run: go build ./...
+      - name: Run unit tests with coverage
+        run: go test --short ./... -race -coverprofile=coverage.txt -covermode=atomic
+      - name: Upload coverage to Codecov
+        if: github.repository == 'meshery-extensions/meshery-mcp-server'
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage.txt
+          flags: unittests
+          token: ${{ secrets.CODECOV_TOKEN }}

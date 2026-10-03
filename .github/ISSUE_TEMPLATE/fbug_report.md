@@ -12,27 +12,25 @@ assignees: ''
 <!-- A brief description of what you expected to happen. -->
 
 ### Screenshots/Logs
-<!-- Add screenshots, if applicable, to help explain your problem. -->
+<!-- Add MCP server logs or client output, if applicable, to help explain your problem. -->
 
 ### Environment
 
 - **Host OS:** Mac Linux Windows
-- **Platform:** Docker or Kubernetes
-- **Meshery Server Version:** stable-v
-- **Meshery Client Version:** stable-v
+- **MCP Server Version:** v
+- **MCP Client:** (e.g. Claude Code, Claude Desktop, VS Code)
+- **Transport:** stdio or SSE
+- **Meshery Server Version:** v
 
-<!-- Optional 
+<!-- Optional
 ### To Reproduce
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+1. Configure the MCP server with '...'
+2. Invoke tool/prompt '....'
+3. See error
 -->
 
 ---
 ### Contributor [Guides](https://docs.meshery.io/project/contributing) and [Handbook](https://layer5.io/community/handbook)
-- 🛠 [Meshery Build & Release Strategy](https://docs.meshery.io/project/contributing/build-and-release)
-- 📚 [Instructions for contributing to documentation](https://github.com/meshery/meshery/blob/master/CONTRIBUTING.md#documentation-contribution-flow)
-   - Meshery documentation [site](https://docs.meshery.io/) and [source](https://github.com/meshery/meshery/tree/master/docs)
-- 🎨 Wireframes and [designs for Meshery UI](https://www.figma.com/file/SMP3zxOjZztdOLtgN4dS2W/Meshery-UI) in Figma [(open invite)](https://www.figma.com/team_invite/redeem/qJy1c95qirjgWQODApilR9)
+- 📦 [Meshery MCP Server repository](https://github.com/meshery-extensions/meshery-mcp-server)
+- 📚 [Model Context Protocol specification](https://modelcontextprotocol.io)
 - 🙋🏾🙋🏼 Questions: [Discussion Forum](https://meshery.io/community#community-forums) and [Community Slack](https://slack.meshery.io)

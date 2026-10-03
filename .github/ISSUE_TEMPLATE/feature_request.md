@@ -1,6 +1,6 @@
 ---
 name: 💡 General Feature Request
-about: Suggest an enhancement to Meshery.
+about: Suggest an enhancement to the Meshery MCP Server.
 title: ''
 labels: 'kind/enhancement'
 assignees: ''
@@ -17,13 +17,8 @@ assignees: ''
 ### Acceptance Tests
 <!-- [Optional] Stipulations of functional behavior or non-functional items that must be in-place in order for the issue to be closed. -->
 
-### Mockups
-<!-- [Optional] Any visual diagrams of the desired user interface. -->
-
 ---
 ### Contributor [Guides](https://docs.meshery.io/project/contributing) and [Handbook](https://layer5.io/community/handbook)
-- 🛠 [Meshery Build & Release Strategy](https://docs.meshery.io/project/contributing/build-and-release)
-- 📚 [Instructions for contributing to documentation](https://github.com/meshery/meshery/blob/master/CONTRIBUTING.md#documentation-contribution-flow)
-   - Meshery documentation [site](https://docs.meshery.io/) and [source](https://github.com/meshery/meshery/tree/master/docs)
-- 🎨 Wireframes and designs for Meshery UI in [Figma](https://www.figma.com/file/SMP3zxOjZztdOLtgN4dS2W/Meshery-UI)
+- 📦 [Meshery MCP Server repository](https://github.com/meshery-extensions/meshery-mcp-server)
+- 📚 [Model Context Protocol specification](https://modelcontextprotocol.io)
 - 🙋🏾🙋🏼 Questions: [Discussion Forum](https://meshery.io/community#community-forums) and [Community Slack](https://slack.meshery.io)
