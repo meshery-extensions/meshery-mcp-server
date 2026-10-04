@@ -25,6 +25,22 @@ func (m *mockMesheryClient) ListDesigns(ctx context.Context, page, pageSize int,
 	return m.designs, len(m.designs), nil
 }
 
+func (m *mockMesheryClient) Ping(ctx context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{"status": "ok"}, nil
+}
+
+func (m *mockMesheryClient) GetEnvironments(ctx context.Context, orgID string, page, pageSize int) ([]map[string]interface{}, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockMesheryClient) GetConnections(ctx context.Context, page, pageSize int) ([]map[string]interface{}, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockMesheryClient) GetAdapters(ctx context.Context) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+
 func TestListDesignsTool_Execute_Success(t *testing.T) {
 	mockClient := &mockMesheryClient{
 		designs: []map[string]interface{}{

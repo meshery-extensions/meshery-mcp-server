@@ -141,3 +141,96 @@ func TestMesheryClient_ListDesigns_BoundedErrorBodyReading(t *testing.T) {
 		t.Errorf("error message exceeds 70KB limit, read body was not properly bounded: len=%d", len(errMsg))
 	}
 }
+
+func TestMesheryClient_Ping(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/system/version" {
+			t.Errorf("expected path /api/system/version, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"build": "v1.0.0", "commit": "abcdef"}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+	ver, err := client.Ping(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error on Ping: %v", err)
+	}
+	if ver["build"] != "v1.0.0" {
+		t.Errorf("expected build v1.0.0, got %v", ver["build"])
+	}
+}
+
+func TestMesheryClient_GetEnvironments_OrgIDQuery(t *testing.T) {
+	var capturedOrgID string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedOrgID = r.URL.Query().Get("orgId")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"totalCount": 2, "environments": [{"id": "e-1", "name": "staging"}, {"id": "e-2", "name": "prod"}]}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+	envs, total, err := client.GetEnvironments(context.Background(), "org-123", 0, 10)
+	if err != nil {
+		t.Fatalf("unexpected error on GetEnvironments: %v", err)
+	}
+	if capturedOrgID != "org-123" {
+		t.Errorf("expected query orgId=org-123, got %s", capturedOrgID)
+	}
+	if total != 2 {
+		t.Errorf("expected total 2, got %d", total)
+	}
+	if len(envs) != 2 {
+		t.Errorf("expected 2 environments, got %d", len(envs))
+	}
+}
+
+func TestMesheryClient_GetConnections(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/system/meshsync/connections" {
+			t.Errorf("expected path /api/system/meshsync/connections, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"totalCount": 1, "connections": [{"id": "c-1", "status": "connected"}]}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+	conns, total, err := client.GetConnections(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatalf("unexpected error on GetConnections: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected total 1, got %d", total)
+	}
+	if len(conns) != 1 {
+		t.Errorf("expected 1 connection, got %d", len(conns))
+	}
+}
+
+func TestMesheryClient_GetAdapters(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/system/adapters" {
+			t.Errorf("expected path /api/system/adapters, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[{"name": "meshery-istio", "location": "localhost:10000"}]`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+	adapters, err := client.GetAdapters(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error on GetAdapters: %v", err)
+	}
+	if len(adapters) != 1 {
+		t.Errorf("expected 1 adapter, got %d", len(adapters))
+	}
+}
+

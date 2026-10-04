@@ -18,7 +18,11 @@ import (
 
 // Client defines the interface for communicating with Meshery Server APIs.
 type Client interface {
+	Ping(ctx context.Context) (map[string]interface{}, error)
 	ListDesigns(ctx context.Context, page, pageSize int, search string) ([]map[string]interface{}, int, error)
+	GetEnvironments(ctx context.Context, orgID string, page, pageSize int) ([]map[string]interface{}, int, error)
+	GetConnections(ctx context.Context, page, pageSize int) ([]map[string]interface{}, int, error)
+	GetAdapters(ctx context.Context) ([]map[string]interface{}, error)
 }
 
 type mesheryClient struct {
@@ -142,4 +146,245 @@ func (c *mesheryClient) ListDesigns(ctx context.Context, page, pageSize int, sea
 	}
 
 	return payload.Patterns, payload.TotalCount, nil
+}
+
+// Ping checks connectivity to Meshery Server by calling GET /api/system/version.
+func (c *mesheryClient) Ping(ctx context.Context) (map[string]interface{}, error) {
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/system/version", cleanBaseURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ping request: %w", err)
+	}
+
+	u, err := url.Parse(endpointURL)
+	if err == nil {
+		isSecureScheme := u.Scheme == "https"
+		isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+		if c.token != "" && (isSecureScheme || isLoopbackHost) {
+			cleanToken := strings.TrimPrefix(c.token, "Bearer ")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
+			req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
+			req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
+		}
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		sanitizedErr := security.SanitizeString(err.Error())
+		return nil, fmt.Errorf("failed to execute ping HTTP query: %s", sanitizedErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("unauthenticated ping request: status %d", resp.StatusCode)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		limitedReader := io.LimitReader(resp.Body, 64*1024)
+		body, _ := io.ReadAll(limitedReader)
+		sanitizedBody := security.SanitizeString(string(body))
+		return nil, fmt.Errorf("meshery API ping returned status %d: %s", resp.StatusCode, sanitizedBody)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode ping JSON response: %w", err)
+	}
+
+	return result, nil
+}
+
+// GetEnvironments retrieves environments for an organization from /api/environments?orgId=... with pagination.
+func (c *mesheryClient) GetEnvironments(ctx context.Context, orgID string, page, pageSize int) ([]map[string]interface{}, int, error) {
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/environments", cleanBaseURL)
+	u, err := url.Parse(endpointURL)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to parse environments endpoint URL: %w", err)
+	}
+
+	q := u.Query()
+	if orgID != "" {
+		q.Set("orgId", orgID)
+	}
+	if page >= 0 {
+		q.Set("page", strconv.Itoa(page))
+	}
+	if pageSize > 0 {
+		q.Set("pagesize", strconv.Itoa(pageSize))
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create environments request: %w", err)
+	}
+
+	isSecureScheme := u.Scheme == "https"
+	isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+	if c.token != "" && (isSecureScheme || isLoopbackHost) {
+		cleanToken := strings.TrimPrefix(c.token, "Bearer ")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
+		req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
+		req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		sanitizedErr := security.SanitizeString(err.Error())
+		return nil, 0, fmt.Errorf("failed to execute environments HTTP query: %s", sanitizedErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
+		return nil, 0, fmt.Errorf("unauthenticated environments request: status %d", resp.StatusCode)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		limitedReader := io.LimitReader(resp.Body, 64*1024)
+		body, _ := io.ReadAll(limitedReader)
+		sanitizedBody := security.SanitizeString(string(body))
+		return nil, 0, fmt.Errorf("meshery API environments returned status %d: %s", resp.StatusCode, sanitizedBody)
+	}
+
+	var payload struct {
+		TotalCount   int                      `json:"totalCount"`
+		AltTotal     int                      `json:"total_count"`
+		Environments []map[string]interface{} `json:"environments"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, 0, fmt.Errorf("failed to decode environments JSON response: %w", err)
+	}
+
+	total := payload.TotalCount
+	if total == 0 {
+		total = payload.AltTotal
+	}
+	if total == 0 {
+		total = len(payload.Environments)
+	}
+
+	return payload.Environments, total, nil
+}
+
+// GetConnections retrieves MeshSync connection state from /api/system/meshsync/connections with pagination.
+func (c *mesheryClient) GetConnections(ctx context.Context, page, pageSize int) ([]map[string]interface{}, int, error) {
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/system/meshsync/connections", cleanBaseURL)
+	u, err := url.Parse(endpointURL)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to parse connections endpoint URL: %w", err)
+	}
+
+	q := u.Query()
+	if page >= 0 {
+		q.Set("page", strconv.Itoa(page))
+	}
+	if pageSize > 0 {
+		q.Set("pagesize", strconv.Itoa(pageSize))
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create connections request: %w", err)
+	}
+
+	isSecureScheme := u.Scheme == "https"
+	isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+	if c.token != "" && (isSecureScheme || isLoopbackHost) {
+		cleanToken := strings.TrimPrefix(c.token, "Bearer ")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
+		req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
+		req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		sanitizedErr := security.SanitizeString(err.Error())
+		return nil, 0, fmt.Errorf("failed to execute connections HTTP query: %s", sanitizedErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
+		return nil, 0, fmt.Errorf("unauthenticated connections request: status %d", resp.StatusCode)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		limitedReader := io.LimitReader(resp.Body, 64*1024)
+		body, _ := io.ReadAll(limitedReader)
+		sanitizedBody := security.SanitizeString(string(body))
+		return nil, 0, fmt.Errorf("meshery API connections returned status %d: %s", resp.StatusCode, sanitizedBody)
+	}
+
+	var payload struct {
+		TotalCount  int                      `json:"totalCount"`
+		AltTotal    int                      `json:"total_count"`
+		Connections []map[string]interface{} `json:"connections"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, 0, fmt.Errorf("failed to decode connections JSON response: %w", err)
+	}
+
+	total := payload.TotalCount
+	if total == 0 {
+		total = payload.AltTotal
+	}
+	if total == 0 {
+		total = len(payload.Connections)
+	}
+
+	return payload.Connections, total, nil
+}
+
+// GetAdapters retrieves available mesh adapters from /api/system/adapters.
+func (c *mesheryClient) GetAdapters(ctx context.Context) ([]map[string]interface{}, error) {
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/system/adapters", cleanBaseURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create adapters request: %w", err)
+	}
+
+	u, err := url.Parse(endpointURL)
+	if err == nil {
+		isSecureScheme := u.Scheme == "https"
+		isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+		if c.token != "" && (isSecureScheme || isLoopbackHost) {
+			cleanToken := strings.TrimPrefix(c.token, "Bearer ")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
+			req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
+			req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
+		}
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		sanitizedErr := security.SanitizeString(err.Error())
+		return nil, fmt.Errorf("failed to execute adapters HTTP query: %s", sanitizedErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("unauthenticated adapters request: status %d", resp.StatusCode)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		limitedReader := io.LimitReader(resp.Body, 64*1024)
+		body, _ := io.ReadAll(limitedReader)
+		sanitizedBody := security.SanitizeString(string(body))
+		return nil, fmt.Errorf("meshery API adapters returned status %d: %s", resp.StatusCode, sanitizedBody)
+	}
+
+	var adapters []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&adapters); err != nil {
+		return nil, fmt.Errorf("failed to decode adapters JSON response: %w", err)
+	}
+
+	return adapters, nil
 }
