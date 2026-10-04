@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meshery-extensions/meshery-mcp-server/pkg/errors"
 	"github.com/meshery-extensions/meshery-mcp-server/pkg/security"
 )
 
@@ -71,6 +72,21 @@ func NewClient(baseURL string, args ...string) Client {
 	}
 }
 
+// attachCredentials attaches token authorization header and dual session cookies over HTTPS or loopback transport.
+func (c *mesheryClient) attachCredentials(req *http.Request, u *url.URL) {
+	if c.token == "" || u == nil {
+		return
+	}
+	isSecureScheme := u.Scheme == "https"
+	isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+	if isSecureScheme || isLoopbackHost {
+		cleanToken := strings.TrimPrefix(c.token, "Bearer ")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
+		req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
+		req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
+	}
+}
+
 // ListDesigns retrieves available design patterns from Meshery Server /api/pattern endpoint with 0-indexed pagination & search.
 func (c *mesheryClient) ListDesigns(ctx context.Context, page, pageSize int, search string) ([]map[string]interface{}, int, error) {
 	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
@@ -97,19 +113,7 @@ func (c *mesheryClient) ListDesigns(ctx context.Context, page, pageSize int, sea
 		return nil, 0, fmt.Errorf("failed to create list_designs request: %w", err)
 	}
 
-	// CWE-319 Cleartext Transmission Prevention:
-	// Only attach session credentials over HTTPS or secure loopback connections (localhost / 127.0.0.1)
-	isSecureScheme := u.Scheme == "https"
-	isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
-
-	if c.token != "" && (isSecureScheme || isLoopbackHost) {
-		cleanToken := strings.TrimPrefix(c.token, "Bearer ")
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
-
-		// Send both token and meshery-provider cookies required for full Meshery session auth
-		req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
-		req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
-	}
+	c.attachCredentials(req, u)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -120,7 +124,7 @@ func (c *mesheryClient) ListDesigns(ctx context.Context, page, pageSize int, sea
 
 	// Check for auth redirects (302 Found or 307 Temporary Redirect to /provider)
 	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
-		return nil, 0, fmt.Errorf("unauthenticated request: Meshery Server returned status %d (authentication required)", resp.StatusCode)
+		return nil, 0, errors.ErrUnauthenticated(fmt.Errorf("status %d", resp.StatusCode))
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -160,14 +164,7 @@ func (c *mesheryClient) Ping(ctx context.Context) (map[string]interface{}, error
 
 	u, err := url.Parse(endpointURL)
 	if err == nil {
-		isSecureScheme := u.Scheme == "https"
-		isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
-		if c.token != "" && (isSecureScheme || isLoopbackHost) {
-			cleanToken := strings.TrimPrefix(c.token, "Bearer ")
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
-			req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
-			req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
-		}
+		c.attachCredentials(req, u)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -178,7 +175,7 @@ func (c *mesheryClient) Ping(ctx context.Context) (map[string]interface{}, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("unauthenticated ping request: status %d", resp.StatusCode)
+		return nil, errors.ErrUnauthenticated(fmt.Errorf("ping status %d", resp.StatusCode))
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -222,14 +219,7 @@ func (c *mesheryClient) GetEnvironments(ctx context.Context, orgID string, page,
 		return nil, 0, fmt.Errorf("failed to create environments request: %w", err)
 	}
 
-	isSecureScheme := u.Scheme == "https"
-	isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
-	if c.token != "" && (isSecureScheme || isLoopbackHost) {
-		cleanToken := strings.TrimPrefix(c.token, "Bearer ")
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
-		req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
-		req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
-	}
+	c.attachCredentials(req, u)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -239,7 +229,7 @@ func (c *mesheryClient) GetEnvironments(ctx context.Context, orgID string, page,
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
-		return nil, 0, fmt.Errorf("unauthenticated environments request: status %d", resp.StatusCode)
+		return nil, 0, errors.ErrUnauthenticated(fmt.Errorf("environments status %d", resp.StatusCode))
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -293,14 +283,7 @@ func (c *mesheryClient) GetConnections(ctx context.Context, page, pageSize int) 
 		return nil, 0, fmt.Errorf("failed to create connections request: %w", err)
 	}
 
-	isSecureScheme := u.Scheme == "https"
-	isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
-	if c.token != "" && (isSecureScheme || isLoopbackHost) {
-		cleanToken := strings.TrimPrefix(c.token, "Bearer ")
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
-		req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
-		req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
-	}
+	c.attachCredentials(req, u)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -310,7 +293,7 @@ func (c *mesheryClient) GetConnections(ctx context.Context, page, pageSize int) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
-		return nil, 0, fmt.Errorf("unauthenticated connections request: status %d", resp.StatusCode)
+		return nil, 0, errors.ErrUnauthenticated(fmt.Errorf("connections status %d", resp.StatusCode))
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -353,14 +336,7 @@ func (c *mesheryClient) GetAdapters(ctx context.Context) ([]map[string]interface
 
 	u, err := url.Parse(endpointURL)
 	if err == nil {
-		isSecureScheme := u.Scheme == "https"
-		isLoopbackHost := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
-		if c.token != "" && (isSecureScheme || isLoopbackHost) {
-			cleanToken := strings.TrimPrefix(c.token, "Bearer ")
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cleanToken))
-			req.AddCookie(&http.Cookie{Name: "token", Value: cleanToken})
-			req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
-		}
+		c.attachCredentials(req, u)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -371,7 +347,7 @@ func (c *mesheryClient) GetAdapters(ctx context.Context) ([]map[string]interface
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("unauthenticated adapters request: status %d", resp.StatusCode)
+		return nil, errors.ErrUnauthenticated(fmt.Errorf("adapters status %d", resp.StatusCode))
 	}
 
 	if resp.StatusCode != http.StatusOK {

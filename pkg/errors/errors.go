@@ -17,11 +17,15 @@ const (
 
 // ErrUnauthenticated creates a canonical MeshKit error for authentication failures.
 func ErrUnauthenticated(err error) error {
+	desc := "Failed to authenticate request against Meshery API provider."
+	if err != nil {
+		desc = desc + " Cause: " + err.Error()
+	}
 	return errors.New(
 		ErrUnauthenticatedCode,
 		errors.Alert,
 		[]string{"Authentication Failure"},
-		[]string{"Failed to authenticate request against Meshery API provider."},
+		[]string{desc},
 		[]string{"Authenticated Meshery context is missing, invalid, or expired."},
 		[]string{"Verify valid Meshery Server authentication context and credentials."},
 	)
@@ -29,11 +33,15 @@ func ErrUnauthenticated(err error) error {
 
 // ErrUpstreamFailed creates a canonical MeshKit error for upstream API query failures.
 func ErrUpstreamFailed(err error) error {
+	desc := "Failed to query upstream Meshery Server endpoint."
+	if err != nil {
+		desc = desc + " Cause: " + err.Error()
+	}
 	return errors.New(
 		ErrUpstreamFailedCode,
 		errors.Alert,
 		[]string{"Upstream Meshery Unreachable"},
-		[]string{"Failed to query upstream Meshery Server endpoint."},
+		[]string{desc},
 		[]string{"Meshery Server is offline or network partition occurred."},
 		[]string{"Ensure Meshery Server is running at target URL and reachable over network."},
 	)
@@ -41,11 +49,15 @@ func ErrUpstreamFailed(err error) error {
 
 // ErrSchemaInvalid creates a canonical MeshKit error for payload validation failures.
 func ErrSchemaInvalid(err error) error {
+	desc := "Incoming tool arguments failed JSON schema validation."
+	if err != nil {
+		desc = desc + " Cause: " + err.Error()
+	}
 	return errors.New(
 		ErrSchemaInvalidCode,
 		errors.Alert,
 		[]string{"Schema Validation Failed"},
-		[]string{"Incoming tool arguments failed JSON schema validation."},
+		[]string{desc},
 		[]string{"Caller provided invalid parameters or schema mismatch."},
 		[]string{"Validate request arguments against tool schema definition."},
 	)

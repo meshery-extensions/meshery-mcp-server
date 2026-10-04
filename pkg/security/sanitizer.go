@@ -171,6 +171,11 @@ func SanitizeString(input string) (res string) {
 	result := input
 
 	for key := range exactSensitiveKeys {
+		// Exclude generic words from unquoted free-text matching to prevent false positives
+		if key == "data" || key == "session" || key == "pass" {
+			continue
+		}
+
 		patterns := []string{
 			"\"" + key + "\": \"",
 			"\"" + key + "\":\"",
@@ -195,6 +200,16 @@ func SanitizeString(input string) (res string) {
 					break
 				}
 				realIdx := searchIdx + idx
+
+				// Skip matches preceded by word characters (letter, digit, underscore, hyphen)
+				if realIdx > 0 {
+					prev := result[realIdx-1]
+					if (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || (prev >= '0' && prev <= '9') || prev == '_' || prev == '-' {
+						searchIdx = realIdx + len(pattern)
+						continue
+					}
+				}
+
 				valStart := realIdx + len(pattern)
 				remainder := result[valStart:]
 
