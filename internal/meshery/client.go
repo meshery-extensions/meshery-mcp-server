@@ -2,6 +2,7 @@
 package meshery
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -22,6 +23,10 @@ type Client interface {
 	Ping(ctx context.Context) (map[string]interface{}, error)
 	ListDesigns(ctx context.Context, page, pageSize int, search string) ([]map[string]interface{}, int, error)
 	GetEnvironments(ctx context.Context, orgID string, page, pageSize int) ([]map[string]interface{}, int, error)
+	GetEnvironmentByID(ctx context.Context, environmentID string) (map[string]interface{}, error)
+	CreateEnvironment(ctx context.Context, name, description, orgID string) (map[string]interface{}, error)
+	ListWorkspaces(ctx context.Context, orgID string, page, pageSize int) ([]map[string]interface{}, int, error)
+	GetWorkspaceByID(ctx context.Context, workspaceID string) (map[string]interface{}, error)
 	GetConnections(ctx context.Context, page, pageSize int) ([]map[string]interface{}, int, error)
 	GetAdapters(ctx context.Context) ([]map[string]interface{}, error)
 }
@@ -363,4 +368,233 @@ func (c *mesheryClient) GetAdapters(ctx context.Context) ([]map[string]interface
 	}
 
 	return adapters, nil
+}
+
+// GetEnvironmentByID fetches details of a single environment by ID from /api/environments/{id}.
+func (c *mesheryClient) GetEnvironmentByID(ctx context.Context, environmentID string) (map[string]interface{}, error) {
+	environmentID = strings.TrimSpace(environmentID)
+	if environmentID == "" {
+		return nil, fmt.Errorf("environmentID cannot be empty")
+	}
+
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/environments/%s", cleanBaseURL, url.PathEscape(environmentID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create get_environment request: %w", err)
+	}
+
+	u, err := url.Parse(endpointURL)
+	if err == nil {
+		c.attachCredentials(req, u)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		sanitizedErr := security.SanitizeString(err.Error())
+		return nil, fmt.Errorf("failed to execute get_environment HTTP query: %s", sanitizedErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.ErrUnauthenticated(fmt.Errorf("get_environment status %d", resp.StatusCode))
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("environment with ID %q not found", environmentID)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		limitedReader := io.LimitReader(resp.Body, 64*1024)
+		body, _ := io.ReadAll(limitedReader)
+		sanitizedBody := security.SanitizeString(string(body))
+		return nil, fmt.Errorf("meshery API get_environment returned status %d: %s", resp.StatusCode, sanitizedBody)
+	}
+
+	var env map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("failed to decode get_environment JSON response: %w", err)
+	}
+
+	return env, nil
+}
+
+// CreateEnvironment creates a new environment via POST /api/environments.
+func (c *mesheryClient) CreateEnvironment(ctx context.Context, name, description, orgID string) (map[string]interface{}, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("environment name cannot be empty")
+	}
+
+	payload := map[string]interface{}{
+		"name": name,
+	}
+	if description != "" {
+		payload["description"] = description
+	}
+	if orgID != "" {
+		payload["organization_id"] = orgID
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal create_environment payload: %w", err)
+	}
+
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/environments", cleanBaseURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create create_environment request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	u, err := url.Parse(endpointURL)
+	if err == nil {
+		c.attachCredentials(req, u)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		sanitizedErr := security.SanitizeString(err.Error())
+		return nil, fmt.Errorf("failed to execute create_environment HTTP request: %s", sanitizedErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.ErrUnauthenticated(fmt.Errorf("create_environment status %d", resp.StatusCode))
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		limitedReader := io.LimitReader(resp.Body, 64*1024)
+		body, _ := io.ReadAll(limitedReader)
+		sanitizedBody := security.SanitizeString(string(body))
+		return nil, fmt.Errorf("meshery API create_environment returned status %d: %s", resp.StatusCode, sanitizedBody)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode create_environment JSON response: %w", err)
+	}
+
+	return result, nil
+}
+
+// ListWorkspaces retrieves available workspaces from /api/workspaces with pagination.
+func (c *mesheryClient) ListWorkspaces(ctx context.Context, orgID string, page, pageSize int) ([]map[string]interface{}, int, error) {
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/workspaces", cleanBaseURL)
+	u, err := url.Parse(endpointURL)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to parse workspaces endpoint URL: %w", err)
+	}
+
+	q := u.Query()
+	if orgID != "" {
+		q.Set("orgId", orgID)
+	}
+	if page >= 0 {
+		q.Set("page", strconv.Itoa(page))
+	}
+	if pageSize > 0 {
+		q.Set("pagesize", strconv.Itoa(pageSize))
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create workspaces request: %w", err)
+	}
+
+	c.attachCredentials(req, u)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		sanitizedErr := security.SanitizeString(err.Error())
+		return nil, 0, fmt.Errorf("failed to execute workspaces HTTP query: %s", sanitizedErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
+		return nil, 0, errors.ErrUnauthenticated(fmt.Errorf("workspaces status %d", resp.StatusCode))
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		limitedReader := io.LimitReader(resp.Body, 64*1024)
+		body, _ := io.ReadAll(limitedReader)
+		sanitizedBody := security.SanitizeString(string(body))
+		return nil, 0, fmt.Errorf("meshery API workspaces returned status %d: %s", resp.StatusCode, sanitizedBody)
+	}
+
+	var payload struct {
+		TotalCount int                      `json:"totalCount"`
+		AltTotal   int                      `json:"total_count"`
+		Workspaces []map[string]interface{} `json:"workspaces"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, 0, fmt.Errorf("failed to decode workspaces JSON response: %w", err)
+	}
+
+	total := payload.TotalCount
+	if total == 0 {
+		total = payload.AltTotal
+	}
+	if total == 0 {
+		total = len(payload.Workspaces)
+	}
+
+	return payload.Workspaces, total, nil
+}
+
+// GetWorkspaceByID fetches details of a single workspace by ID from /api/workspaces/{id}.
+func (c *mesheryClient) GetWorkspaceByID(ctx context.Context, workspaceID string) (map[string]interface{}, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceID cannot be empty")
+	}
+
+	cleanBaseURL := strings.TrimRight(strings.TrimSpace(c.baseURL), "/")
+	endpointURL := fmt.Sprintf("%s/api/workspaces/%s", cleanBaseURL, url.PathEscape(workspaceID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create get_workspace request: %w", err)
+	}
+
+	u, err := url.Parse(endpointURL)
+	if err == nil {
+		c.attachCredentials(req, u)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		sanitizedErr := security.SanitizeString(err.Error())
+		return nil, fmt.Errorf("failed to execute get_workspace HTTP query: %s", sanitizedErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.ErrUnauthenticated(fmt.Errorf("get_workspace status %d", resp.StatusCode))
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("workspace with ID %q not found", workspaceID)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		limitedReader := io.LimitReader(resp.Body, 64*1024)
+		body, _ := io.ReadAll(limitedReader)
+		sanitizedBody := security.SanitizeString(string(body))
+		return nil, fmt.Errorf("meshery API get_workspace returned status %d: %s", resp.StatusCode, sanitizedBody)
+	}
+
+	var ws map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&ws); err != nil {
+		return nil, fmt.Errorf("failed to decode get_workspace JSON response: %w", err)
+	}
+
+	return ws, nil
 }

@@ -33,6 +33,22 @@ func (m *mockMesheryClient) GetEnvironments(ctx context.Context, orgID string, p
 	return nil, 0, nil
 }
 
+func (m *mockMesheryClient) GetEnvironmentByID(ctx context.Context, environmentID string) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockMesheryClient) CreateEnvironment(ctx context.Context, name, description, orgID string) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockMesheryClient) ListWorkspaces(ctx context.Context, orgID string, page, pageSize int) ([]map[string]interface{}, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockMesheryClient) GetWorkspaceByID(ctx context.Context, workspaceID string) (map[string]interface{}, error) {
+	return nil, nil
+}
+
 func (m *mockMesheryClient) GetConnections(ctx context.Context, page, pageSize int) ([]map[string]interface{}, int, error) {
 	return nil, 0, nil
 }

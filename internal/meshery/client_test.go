@@ -234,3 +234,111 @@ func TestMesheryClient_GetAdapters(t *testing.T) {
 	}
 }
 
+func TestMesheryClient_GetEnvironmentByID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/environments/env-123" {
+			t.Errorf("expected path /api/environments/env-123, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id": "env-123", "name": "production"}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+	env, err := client.GetEnvironmentByID(context.Background(), "env-123")
+	if err != nil {
+		t.Fatalf("unexpected error on GetEnvironmentByID: %v", err)
+	}
+	if env["name"] != "production" {
+		t.Errorf("expected environment name production, got %v", env["name"])
+	}
+
+	_, err = client.GetEnvironmentByID(context.Background(), "  ")
+	if err == nil {
+		t.Errorf("expected error when passing empty environmentID, got nil")
+	}
+}
+
+func TestMesheryClient_CreateEnvironment(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected method POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/environments" {
+			t.Errorf("expected path /api/environments, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id": "env-new", "name": "staging", "description": "staging env"}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+	created, err := client.CreateEnvironment(context.Background(), "staging", "staging env", "org-1")
+	if err != nil {
+		t.Fatalf("unexpected error on CreateEnvironment: %v", err)
+	}
+	if created["id"] != "env-new" {
+		t.Errorf("expected created ID env-new, got %v", created["id"])
+	}
+
+	_, err = client.CreateEnvironment(context.Background(), "", "", "")
+	if err == nil {
+		t.Errorf("expected error when creating environment with empty name, got nil")
+	}
+}
+
+func TestMesheryClient_ListWorkspaces(t *testing.T) {
+	var capturedOrgID string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedOrgID = r.URL.Query().Get("orgId")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"totalCount": 1, "workspaces": [{"id": "ws-1", "name": "default-workspace"}]}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+	workspaces, total, err := client.ListWorkspaces(context.Background(), "org-1", 0, 10)
+	if err != nil {
+		t.Fatalf("unexpected error on ListWorkspaces: %v", err)
+	}
+	if capturedOrgID != "org-1" {
+		t.Errorf("expected query orgId=org-1, got %s", capturedOrgID)
+	}
+	if total != 1 {
+		t.Errorf("expected total 1, got %d", total)
+	}
+	if len(workspaces) != 1 {
+		t.Errorf("expected 1 workspace, got %d", len(workspaces))
+	}
+}
+
+func TestMesheryClient_GetWorkspaceByID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces/ws-99" {
+			t.Errorf("expected path /api/workspaces/ws-99, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id": "ws-99", "name": "analytics-workspace"}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+	ws, err := client.GetWorkspaceByID(context.Background(), "ws-99")
+	if err != nil {
+		t.Fatalf("unexpected error on GetWorkspaceByID: %v", err)
+	}
+	if ws["name"] != "analytics-workspace" {
+		t.Errorf("expected workspace name analytics-workspace, got %v", ws["name"])
+	}
+
+	_, err = client.GetWorkspaceByID(context.Background(), "")
+	if err == nil {
+		t.Errorf("expected error when passing empty workspaceID, got nil")
+	}
+}
+
+
