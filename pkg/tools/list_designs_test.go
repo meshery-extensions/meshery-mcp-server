@@ -49,6 +49,12 @@ func (m *mockMesheryClient) GetWorkspaceByID(ctx context.Context, workspaceID st
 	return nil, nil
 }
 
+func (m *mockMesheryClient) SetActiveWorkspaceID(id string) {}
+
+func (m *mockMesheryClient) GetActiveWorkspaceID() string {
+	return ""
+}
+
 func (m *mockMesheryClient) GetConnections(ctx context.Context, page, pageSize int) ([]map[string]interface{}, int, error) {
 	return nil, 0, nil
 }

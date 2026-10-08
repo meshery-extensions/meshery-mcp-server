@@ -163,6 +163,8 @@ func (t *SwitchWorkspaceTool) Execute(ctx context.Context, params map[string]int
 		return nil, fmt.Errorf("switch_workspace failure: %s", sanitizedErr)
 	}
 
+	t.client.SetActiveWorkspaceID(workspaceID)
+
 	sanitizedWS := security.SanitizeMap(ws)
 
 	return map[string]interface{}{

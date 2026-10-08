@@ -214,10 +214,16 @@ func SanitizeString(input string) (res string) {
 				remainder := result[valStart:]
 
 				hasQuote := false
-				if strings.HasSuffix(pattern, "\"") || strings.HasSuffix(pattern, "'") {
+				quoteChar := byte(0)
+				if strings.HasSuffix(pattern, "\"") {
 					hasQuote = true
+					quoteChar = '"'
+				} else if strings.HasSuffix(pattern, "'") {
+					hasQuote = true
+					quoteChar = '\''
 				} else if len(remainder) > 0 && (remainder[0] == '"' || remainder[0] == '\'') {
 					hasQuote = true
+					quoteChar = remainder[0]
 					valStart++
 					remainder = result[valStart:]
 				}
@@ -228,20 +234,29 @@ func SanitizeString(input string) (res string) {
 					valStart += len("bearer ")
 				}
 
-				valEnd := strings.IndexAny(result[valStart:], " \t\n\r\"',;}")
 				var endIdx int
-				if valEnd == -1 {
-					endIdx = len(result)
+				if hasQuote && quoteChar != 0 {
+					quoteIdx := strings.IndexByte(result[valStart:], quoteChar)
+					if quoteIdx != -1 {
+						endIdx = valStart + quoteIdx
+					} else {
+						endIdx = len(result)
+					}
 				} else {
-					endIdx = valStart + valEnd
+					valEnd := strings.IndexAny(result[valStart:], " \t\n\r\",;}")
+					if valEnd == -1 {
+						endIdx = len(result)
+					} else {
+						endIdx = valStart + valEnd
+					}
 				}
 
 				replacement := prefix + RedactedPlaceholder
 				if hasQuote {
-					if endIdx < len(result) && (result[endIdx] == '"' || result[endIdx] == '\'') {
+					if endIdx < len(result) && result[endIdx] == quoteChar {
 						result = result[:valStart] + replacement + result[endIdx:]
 					} else {
-						result = result[:valStart] + replacement + "\"" + result[endIdx:]
+						result = result[:valStart] + replacement + string(quoteChar) + result[endIdx:]
 					}
 				} else {
 					result = result[:valStart] + replacement + result[endIdx:]

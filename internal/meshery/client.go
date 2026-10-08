@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/meshery-extensions/meshery-mcp-server/pkg/errors"
@@ -27,15 +28,42 @@ type Client interface {
 	CreateEnvironment(ctx context.Context, name, description, orgID string) (map[string]interface{}, error)
 	ListWorkspaces(ctx context.Context, orgID string, page, pageSize int) ([]map[string]interface{}, int, error)
 	GetWorkspaceByID(ctx context.Context, workspaceID string) (map[string]interface{}, error)
+	SetActiveWorkspaceID(id string)
+	GetActiveWorkspaceID() string
 	GetConnections(ctx context.Context, page, pageSize int) ([]map[string]interface{}, int, error)
 	GetAdapters(ctx context.Context) ([]map[string]interface{}, error)
 }
 
 type mesheryClient struct {
-	baseURL    string
-	token      string
-	provider   string
-	httpClient *http.Client
+	baseURL           string
+	token             string
+	provider          string
+	activeWorkspaceID string
+	httpClient        *http.Client
+	mu                sync.RWMutex
+}
+
+func (c *mesheryClient) SetActiveWorkspaceID(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.activeWorkspaceID = id
+}
+
+func (c *mesheryClient) GetActiveWorkspaceID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.activeWorkspaceID
+}
+
+func checkAuthResponse(resp *http.Response) error {
+	if resp.StatusCode == http.StatusFound ||
+		resp.StatusCode == http.StatusTemporaryRedirect ||
+		resp.StatusCode == http.StatusSeeOther ||
+		resp.StatusCode == http.StatusUnauthorized ||
+		resp.StatusCode == http.StatusForbidden {
+		return errors.ErrUnauthenticated(fmt.Errorf("status %d", resp.StatusCode))
+	}
+	return nil
 }
 
 // NewClient returns a new Meshery API client instance with optional token and provider authentication values.
