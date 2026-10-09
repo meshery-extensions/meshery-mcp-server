@@ -30,11 +30,10 @@ jobs:
           echo "Repository  : ${{ github.repository }}"
           echo "::endgroup::"
 
-      - name: 🎉 Welcome First-Time Issue Author
-        if: github.event_name == 'issues'
-        uses: actions/first-interaction@v3
-        with:
-          issue_message: |
+      - name: 🎉 Welcome First-Time Contributor
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ISSUE_MESSAGE: |
             👋 **Welcome to the Meshery MCP Server, @${{ github.actor }}!**
 
             Thank you for opening your first issue — we're glad you're here! 🚀
@@ -58,12 +57,7 @@ jobs:
             ---
 
             A maintainer will review your issue shortly. In the meantime, feel free to explore the [contributing guide](https://docs.meshery.io/project/contributing).
-
-      - name: 🎉 Welcome First-Time PR Author
-        if: github.event_name == 'pull_request_target'
-        uses: actions/first-interaction@v3
-        with:
-          pr_message: |
+          PR_MESSAGE: |
             👋 **Welcome to the Meshery MCP Server, @${{ github.actor }}!**
 
             Thank you for opening your first pull request — we're excited to review your contribution! 🚀
@@ -87,6 +81,53 @@ jobs:
             ---
 
             A maintainer will review your PR shortly. Thank you for contributing! 🎊
+        with:
+          script: |
+            const marker = '<!-- meshery-mcp-server:welcome-first-time-contributor -->';
+            const isPR = context.payload.pull_request !== undefined;
+            const number = context.issue.number; // issue # or PR #, whichever triggered this run
+            const login = context.payload.sender.login;
+            const kind = isPR ? 'pull request' : 'issue';
+
+            //Issues and PRs share one repo-wide number counter. `i.number` is an
+            //item's ID, so a lower number means "opened earlier".
+            //The current item is also in the list; `<` excludes it.
+            const openedBefore = (i) => i.number < number;
+            const isSameType = (i) => Boolean(i.pull_request) === isPR;
+
+            let hasPrior = false;
+            await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, creator: login, state: 'all', per_page: 100 },
+              (response, done) => {
+                if (response.data.some((i) => isSameType(i) && openedBefore(i))) {
+                  hasPrior = true;
+                  done();
+                }
+                return [];
+              },
+            );
+            if (hasPrior) {
+              core.info(`Skipping: ${login} has an earlier ${kind}.`);
+              return;
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: number,
+              per_page: 100,
+            });
+            if (comments.some((c) => c.body?.includes(marker))) {
+              core.info('Skipping: welcome already posted.');
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: number,
+              body: `${marker}\n${isPR ? process.env.PR_MESSAGE : process.env.ISSUE_MESSAGE}`,
+            });
+            core.info(`Welcomed ${login} on their first ${kind} (#${number}).`);
 
       - name: 🚨 Alert on Failure
         if: failure()
