@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.27.1
 
 # ---------------------------------------------------------------------------
 # Build stage: has the Go toolchain; produces a static binary.
