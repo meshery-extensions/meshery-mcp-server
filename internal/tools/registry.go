@@ -77,10 +77,10 @@ func NewTools(client *meshery.Client) []Tool {
 				}
 
 				var pageResp struct {
-					Page     int               `json:"page"`
-					PageSize int               `json:"pageSize"`
-					Total    int               `json:"totalCount"`
-					Models   []ModelSummary    `json:"models"`
+					Page     int            `json:"page"`
+					PageSize int            `json:"pageSize"`
+					Total    int            `json:"totalCount"`
+					Models   []ModelSummary `json:"models"`
 				}
 				if err := json.Unmarshal(body, &pageResp); err != nil {
 					return nil, fmt.Errorf("decoding models response: %w", err)
@@ -106,7 +106,7 @@ func NewTools(client *meshery.Client) []Tool {
 			Name:        "get_model",
 			Description: "Get full model details from the Meshery registry.",
 			InputSchema: map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []string{"model_id"},
 				"properties": map[string]any{
 					"model_id": map[string]any{
@@ -195,8 +195,12 @@ func NewTools(client *meshery.Client) []Tool {
 				}
 
 				var pageResp struct {
-					Components []ComponentSummary `json:"components"`
-					Total      int                `json:"totalCount"`
+					Components []struct {
+						ID      string `json:"id"`
+						Name    string `json:"displayName"`
+						Version string `json:"version"`
+					} `json:"components"`
+					Total int `json:"totalCount"`
 				}
 				if err := json.Unmarshal(body, &pageResp); err != nil {
 					return nil, fmt.Errorf("decoding components response: %w", err)
@@ -205,8 +209,8 @@ func NewTools(client *meshery.Client) []Tool {
 				items := make([]ContentItemSummary, 0, len(pageResp.Components))
 				for _, c := range pageResp.Components {
 					items = append(items, ContentItemSummary{
-						ID:     c.ID,
-						Name:   c.Name,
+						ID:      c.ID,
+						Name:    c.Name,
 						Version: c.Version,
 					})
 				}
@@ -221,7 +225,7 @@ func NewTools(client *meshery.Client) []Tool {
 			Name:        "get_component",
 			Description: "Get detailed component schema from the Meshery registry.",
 			InputSchema: map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []string{"component_id"},
 				"properties": map[string]any{
 					"component_id": map[string]any{
@@ -263,7 +267,7 @@ func NewTools(client *meshery.Client) []Tool {
 			Name:        "list_relationships",
 			Description: "List available component relationship types for a model.",
 			InputSchema: map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []string{"model"},
 				"properties": map[string]any{
 					"model": map[string]any{
@@ -294,7 +298,7 @@ func NewTools(client *meshery.Client) []Tool {
 
 				var pageResp struct {
 					Relationships []RelationshipSummary `json:"relationships"`
-					Total         int                 `json:"totalCount"`
+					Total         int                   `json:"totalCount"`
 				}
 				if err := json.Unmarshal(body, &pageResp); err != nil {
 					return nil, fmt.Errorf("decoding relationships response: %w", err)
@@ -340,11 +344,9 @@ type ListModelsResult struct {
 }
 
 type ComponentSummary struct {
-	ID       string `json:"id"`
-	Name     string `json:"displayName"`
-	Kind     string `json:"kind,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Version  string `json:"version,omitempty"`
+	ID      string `json:"id"`
+	Name    string `json:"displayName"`
+	Version string `json:"version"`
 }
 
 type ModelSummary struct {
@@ -376,8 +378,6 @@ type SearchContentItemsResult struct {
 type ContentItemSummary struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
-	Kind    string `json:"kind,omitempty"`
-	Model   string `json:"model,omitempty"`
 	Version string `json:"version,omitempty"`
 }
 
@@ -389,11 +389,9 @@ type ComponentDetail struct {
 	ID          string `json:"id"`
 	Name        string `json:"displayName"`
 	Version     string `json:"version"`
-	DisplayName string `json:"displayName,omitempty"`
 	Description string `json:"description,omitempty"`
 	Format      string `json:"format,omitempty"`
 	Status      string `json:"status,omitempty"`
-	Model       string `json:"model,omitempty"`
 	Schema      any    `json:"component,omitempty"`
 }
 

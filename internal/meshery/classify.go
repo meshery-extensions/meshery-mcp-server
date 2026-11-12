@@ -40,7 +40,7 @@ func (c Classification) String() string {
 
 // ClassificationResult is the output of Classify.
 type ClassificationResult struct {
-	Class   Classification
+	Class Classification
 	// MissingScope is set for 403 when Meshery's response identifies the
 	// missing scope or key; empty otherwise.
 	MissingScope string

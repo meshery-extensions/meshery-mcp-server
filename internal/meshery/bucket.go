@@ -36,7 +36,7 @@ func (b *Bucket) Take(ctx context.Context) error {
 			b.mu.Unlock()
 			return nil
 		}
-		wait := time.Duration((1-b.tokens)/b.rate * float64(time.Second))
+		wait := time.Duration((1 - b.tokens) / b.rate * float64(time.Second))
 		b.last = now
 		b.mu.Unlock()
 

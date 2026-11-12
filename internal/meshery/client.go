@@ -135,7 +135,7 @@ func (c *Client) Call(ctx context.Context, method, path string, tool string) ([]
 
 		resp, err := c.http.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("Meshery request failed: %w", err)
+			return nil, fmt.Errorf("meshery request failed: %w", err)
 		}
 
 		responseBody, readErr := io.ReadAll(resp.Body)
@@ -185,11 +185,11 @@ func (c *Client) Call(ctx context.Context, method, path string, tool string) ([]
 			}
 			continue
 		default:
-			return nil, fmt.Errorf("Meshery request failed: HTTP %d %s", resp.StatusCode,
+			return nil, fmt.Errorf("meshery request failed: HTTP %d %s", resp.StatusCode,
 				strings.TrimSpace(string(responseBody)))
 		}
 	}
-	return nil, fmt.Errorf("Meshery request failed: HTTP %d", lastStatus)
+	return nil, fmt.Errorf("meshery request failed: HTTP %d", lastStatus)
 }
 
 // sleep waits for the retry delay, honoring Retry-After when present and
