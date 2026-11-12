@@ -33,9 +33,10 @@ It is an official [Meshery Extension](https://meshery.io/extensions), written in
 |---|---|
 | Configuration (env vars, config file), logging, Meshery-style errors | ✅ Done |
 | Build, lint, tests, container image, CI | ✅ Done |
-| MCP server over stdio | Planned |
-| Meshery API client | Planned |
-| MCP tools, resources and prompts | Planned |
+| MCP server over stdio | ✅ Done |
+| MCP server over Streamable HTTP | ✅ Done |
+| Meshery API client | ✅ Done |
+| MCP tools, resources and prompts | ✅ Done |
 
 ### Planned scope
 
