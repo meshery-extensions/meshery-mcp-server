@@ -12,7 +12,7 @@
 <a href="https://meshery.io/catalog">Catalog</a>
 </h5>
 <a href="https://github.com/meshery/meshery/blob/master/GOVERNANCE.md#extensions-githubcommeshery-extensions"><img src="https://img.shields.io/badge/support-community-00B39F?style=flat-square&logo=meshery&logoColor=white" alt="Level of support for this repo" /></a>
-<a href="https://github.com/meshery-extensions/meshery-mcp-server/actions/workflows/build-and-test.yml"><img src="https://github.com/meshery-extensions/meshery-mcp-server/actions/workflows/build-and-test.yml/badge.svg" alt="Build and Test" /></a>
+<a href="https://github.com/meshery-extensions/meshery-mcp-server/actions/workflows/build-and-test.yml"><img src="https://img.shields.io/github/actions/workflow/status/meshery-extensions/meshery-mcp-server/build-and-test.yml?label=build%20and%20test" alt="Build and Test" /></a>
 <a href="https://github.com/meshery-extensions/meshery-mcp-server/blob/master/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/meshery-extensions/meshery-mcp-server" alt="Go version" /></a>
 <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-server-000000" alt="Model Context Protocol" /></a>
 <a href="https://slack.meshery.io"><img src="https://img.shields.io/badge/Slack-join%20the%20community-00B39F?logo=slack&logoColor=white" alt="Slack" /></a>
@@ -20,20 +20,53 @@
 
 # Meshery MCP Server
 
-Meshery MCP Server connects AI assistants to [Meshery](https://meshery.io) through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP), an open standard for connecting AI applications to external systems. Any MCP-capable client, such as Claude Desktop, Claude Code, or an IDE agent, can then work with Meshery designs through one consistent interface instead of a custom integration per assistant.
+Meshery MCP Server connects AI assistants to [Meshery](https://meshery.io)
+through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP), an
+open standard for connecting AI applications to external systems. Any
+MCP-capable client, such as Claude Desktop, Claude Code, or an IDE agent, can
+then work with Meshery designs through one consistent interface instead of a
+custom integration per assistant.
 
-It is an official [Meshery Extension](https://meshery.io/extensions), written in Go, and runs as a standalone binary or container next to your Meshery deployment.
+It is an official [Meshery Extension](https://meshery.io/extensions), written
+in Go, and runs as a standalone binary or container next to your Meshery
+deployment.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Client["MCP client<br/>Claude Desktop · Claude Code · Cursor · VS Code Copilot"]
+    Server["meshery-mcp-server<br/>(stdio · JSON-RPC)"]
+    Meshery["Meshery Server<br/>MESHERY_SERVER_URL:9081"]
+    K8s["Kubernetes<br/>clusters · designs · policies"]
+
+    Client -->|JSON-RPC over stdin/stdout| Server
+    Server -->|HTTP(S) + provider token| Meshery
+    Meshery -->|manages| K8s
+```
+
+The MCP client launches the server as a child process and talks to it over
+stdin/stdout, so the server does not listen on any network address. Because
+stdout carries the protocol, all logs go to stderr.
+
+Only `cmd/meshery-mcp-server` wires the packages together. `internal/config` is
+the only package that reads environment variables or the config file; the other
+packages receive plain values from `main`. See
+[docs/config.md](docs/config.md#for-contributors) for details.
 
 ## Project status
 
 > [!NOTE]
-> **Early development.** The project scaffold is in place, but the MCP server itself is not implemented yet: the binary currently loads and validates its configuration, logs a startup line, and exits.
+> **Early development.** The project scaffold is in place, but the MCP server
+> itself is not implemented yet: the binary loads and validates its
+> configuration, logs a startup line, and exits.
 
 | Area | Status |
-|---|---|
+|------|--------|
 | Configuration (env vars, config file), logging, Meshery-style errors | ✅ Done |
 | Build, lint, tests, container image, CI | ✅ Done |
 | MCP server over stdio | Planned |
+| MCP server over Streamable HTTP | Planned |
 | Meshery API client | Planned |
 | MCP tools, resources and prompts | Planned |
 
@@ -53,191 +86,144 @@ These will be exposed through MCP's three building blocks:
 - **Resources**: Meshery data the AI can read as context.
 - **Prompts**: reusable prompt templates for common Meshery workflows.
 
-## Architecture
+See [docs/adr/0001-mcp-sdk-choice.md](docs/adr/0001-mcp-sdk-choice.md) for the
+MCP SDK and protocol-version decision.
 
-```text
-┌──────────────────────────────────────────────────────────────┐
-│ MCP client: Claude Desktop, Claude Code, IDE agents, ...     │
-│ starts the server as a child process                         │
-└──────────────────────────────────────────────────────────────┘
-                                │  JSON-RPC over stdio (stdin/stdout)
-                                ▼
-┌──────────────────────────────────────────────────────────────┐
-│ meshery-mcp-server                                           │
-│                                                              │
-│ cmd/meshery-mcp-server  entrypoint: flags, logger, wiring    │
-│ internal/config         settings from env vars and file      │
-│                                                              │
-│ internal/tools          MCP tools          (planned)         │
-│ internal/resources      MCP resources      (planned)         │
-│ internal/prompts        MCP prompts        (planned)         │
-│ internal/meshery        Meshery API client (planned)         │
-│                                                              │
-│ logs go to stderr; stdout is reserved for the protocol       │
-└──────────────────────────────────────────────────────────────┘
-                                │  HTTP(S) + provider token
-                                ▼
-┌──────────────────────────────────────────────────────────────┐
-│ Meshery Server  (MESHERY_SERVER_URL)                         │
-└──────────────────────────────────────────────────────────────┘
-```
+## Quick start (10 minutes)
 
-The MCP client launches the server and talks to it over stdin/stdout, so the server does not listen on any network address. Because stdout carries the protocol, all logs go to stderr.
+### 1. Install
 
-Only `cmd/meshery-mcp-server` wires the packages together. `internal/config` is the only package that reads environment variables or the config file; the other packages receive plain values from `main`. See [docs/config.md](docs/config.md#for-contributors) for details.
-
-## Repository structure
-
-```text
-meshery-mcp-server/
-├── .github/workflows/          # CI: lint, build and test, Docker image
-├── build/                      # Shared Makefile includes
-├── cmd/meshery-mcp-server/     # Entrypoint
-├── docs/
-│   └── config.md               # Configuration reference
-├── helpers/
-│   └── component_info.json     # Error-code metadata for Meshery's errorutil
-├── internal/
-│   ├── config/                 # Configuration loading and validation
-│   ├── meshery/                # Meshery API client
-│   ├── prompts/                # MCP prompts
-│   ├── resources/              # MCP resources
-│   └── tools/                  # MCP tools
-├── .dockerignore
-├── .golangci.yml               # Lint configuration
-├── config_example.yml          # Example config file
-├── Dockerfile                  # Multi-stage build, distroless non-root runtime
-├── go.mod / go.sum
-└── Makefile                    # Build and development commands
-```
-
-## Quick start
-
-### Prerequisites
-
-| Tool | Version | Needed for |
-|---|---|---|
-| [Go](https://go.dev/doc/install) | as declared in [`go.mod`](go.mod) | Building and testing |
-| [golangci-lint](https://golangci-lint.run/welcome/install/) | v2.x | `make lint` |
-| [Docker](https://docs.docker.com/get-docker/) | any recent version | Container builds only |
-
-### 1. Clone and build
+**From source (Go):**
 
 ```sh
 git clone https://github.com/meshery-extensions/meshery-mcp-server.git
 cd meshery-mcp-server
-make build            # writes bin/meshery-mcp-server
+make build              # writes bin/meshery-mcp-server
+```
+
+Or install with `go install`:
+
+```sh
+go install github.com/meshery-extensions/meshery-mcp-server@latest
+```
+
+**With Docker:**
+
+```sh
+make docker-build
+make docker-run
 ```
 
 ### 2. Configure
 
-The server works with no configuration if Meshery runs at `http://localhost:9081`. Otherwise, set environment variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `MESHERY_SERVER_URL` | `http://localhost:9081` | Meshery server to connect to |
-| `MESHERY_API_TOKEN` | *(none)* | Meshery provider token |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
-
-To use a config file instead:
+Set the Meshery server URL and your provider token:
 
 ```sh
-cp config_example.yml config.local.yaml   # *.local.yaml is gitignored
+export MESHERY_SERVER_URL=http://localhost:9081
+export MESHERY_API_TOKEN=<your-meshery-token>
 ```
 
-and pass it with `--config config.local.yaml`. Environment variables override the file.
+Or create a config file:
 
-[docs/config.md](docs/config.md) is the full reference: precedence rules, token handling, Docker specifics and every error message.
+```sh
+cp config_example.yml config.local.yaml
+meshery-mcp-server --config config.local.yaml
+```
+
+See [docs/configuration.md](docs/configuration.md) for the full reference.
 
 ### 3. Run
 
 ```sh
 make run
-make run ARGS="--config config.local.yaml"
+# time="..." level=info msg="starting meshery-mcp-server ... token_configured=false" app=meshery-mcp-server
 ```
 
-Today this prints a startup line to stderr and exits:
+### 4. Connect Claude Desktop
 
-```text
-time="..." level=info msg="starting meshery-mcp-server version=... commit=... meshery_url=http://localhost:9081 token_configured=false" app=meshery-mcp-server
-```
+Open Claude Desktop's configuration file:
 
-### 4. Run in a container
+| OS | Config file path |
+|----|------------------|
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Linux | `$XDG_CONFIG_HOME/Claude/claude_desktop_config.json`, or `~/.config/Claude/claude_desktop_config.json` |
 
-```sh
-make docker-run
-```
-
-This builds the image and runs it over stdio. Inside a container, `localhost` refers to the container itself, so `make docker-run` points the server at `http://host.docker.internal:9081` by default. Override it with `DOCKER_MESHERY_SERVER_URL`. `MESHERY_API_TOKEN` is forwarded from your shell.
-
-### 5. Connect an MCP client
-
-> [!NOTE]
-> This becomes useful once the MCP server is implemented.
-
-MCP clients start the server themselves. For example, in Claude Desktop's configuration:
+Add the `meshery` server:
 
 ```json
 {
   "mcpServers": {
     "meshery": {
-      "command": "/path/to/meshery-mcp-server",
+      "command": "/absolute/path/to/meshery-mcp-server",
       "env": {
         "MESHERY_SERVER_URL": "http://localhost:9081",
-        "MESHERY_API_TOKEN": "<token>"
+        "MESHERY_API_TOKEN": "<your-meshery-token>"
       }
     }
   }
 }
 ```
 
-Point the client at the binary or at `docker run -i ...`, never at `make`: Make prints its commands to stdout, which would corrupt the MCP stream. [docs/config.md](docs/config.md#from-an-ai-app-mcp-client) has the Docker version.
+Use the absolute path to the built binary. Restart Claude Desktop, then ask
+*"What tools do you have access to?"* in a chat. See
+[docs/integrations/claude-desktop.md](docs/integrations/claude-desktop.md) for
+the full walkthrough, plus guides for
+[VS Code Copilot](docs/integrations/vscode-copilot.md),
+[Cursor](docs/integrations/cursor.md), and
+[Cline](docs/integrations/cline.md).
+
+## Full documentation
+
+| Document | What it covers |
+|----------|----------------|
+| [docs/installation.md](docs/installation.md) | Install from source, Go, or Docker |
+| [docs/configuration.md](docs/configuration.md) | Full config schema, env vars, Docker notes |
+| [docs/tools-reference.md](docs/tools-reference.md) | MCP tools registry (planned) |
+| [docs/development.md](docs/development.md) | Build, test, contribute |
+| [docs/integrations/](docs/integrations/) | Claude Desktop, VS Code Copilot, Cursor, Cline |
 
 ## Development
 
 | Command | Description |
-|---|---|
-| `make build` | Build the binary for your platform into `bin/` |
-| `make run` | Build and run the binary; pass flags with `ARGS="..."` |
+|---------|-------------|
+| `make build` | Build the binary into `bin/` |
+| `make run` | Build and run; pass flags with `ARGS="..."` |
 | `make test` | Run unit tests |
-| `make coverage` | Run tests with the race detector and write `coverage.txt` |
+| `make coverage` | Run tests with the race detector |
 | `make lint` | Run golangci-lint |
-| `make fmt` | Format the code with gofmt |
-| `make clean` | Remove `bin/` and `coverage.txt` |
+| `make fmt` | Format with gofmt |
+| `make docs-lint` | Lint Markdown with markdownlint |
 | `make docker-build` | Build the container image |
-| `make docker-run` | Build the image and run it over stdio |
-| `make` or `make show-help` | List all targets |
+| `make docker-run` | Run the image over stdio |
 
-Every pull request runs three CI jobs: **golangci-lint**, **Build and unit tests** (tidy check, build, tests with coverage), and **Test Docker Image Build** (builds the image and starts it). Run `make lint` and `make coverage` before opening one.
+Errors follow Meshery's
+[error conventions](https://docs.meshery.io/project/contributing/contributing-error).
+Every pull request runs lint, build/test, and a Docker smoke test in CI.
 
-Errors follow Meshery's [error conventions](https://docs.meshery.io/project/contributing/contributing-error): each package defines its errors in `error.go` with `"replace_me"` codes, which Meshery's `errorutil` tool replaces with real ones. To check your errors locally:
+## Community and Contributing
 
-```sh
-go run github.com/meshery/meshkit/cmd/errorutil -d . analyze -i ./helpers -o ./helpers
-```
+Please do! Code and non-code contributions are welcome. This project is
+community-built and fosters collaboration. Contributors are expected to adhere
+to the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md).
 
-## About Meshery Extensions
+- [Contributor Guides](https://docs.meshery.io/project/contributing)
+- [Community Handbook](https://layer5.io/community/handbook)
+- [Discussion Forum](https://meshery.io/community#community-forums)
+- [Community Slack](https://slack.meshery.io/)
 
-[Meshery Extensions](https://meshery.io/extensions) add capabilities to Meshery beyond its core platform. They live in the [meshery-extensions](https://github.com/meshery-extensions) organization, separate from the core [meshery](https://github.com/meshery) organization; the [ecosystem expansion post](https://meshery.io/blog/2025/meshery-ecosystem-expansion) explains why and how that organization is governed.
+Jump into our Slack! Submit the
+[community member form](https://meshery.io/newcomers) to access additional
+resources. Don't forget to join the [Newcomers meeting](https://meet.meshery.io)
+held every Thursday!
 
-Related repositories:
-
-- [meshery/meshery](https://github.com/meshery/meshery): Meshery core
-- [meshery/meshkit](https://github.com/meshery/meshkit): shared Go library used here for logging and errors
-
-<div>
-<h2>Community and Contributing</h2>
-<p>Please do! Code and non-code contributions are welcome. This project is community-built and fosters collaboration. Contributors are expected to adhere to the <a href="https://github.com/cncf/foundation/blob/main/code-of-conduct.md">CNCF Code of Conduct</a>.</p>
-<p>Jump into our <a href="https://slack.meshery.io">Slack</a>! Submit the <a href="https://meshery.io/newcomers">community member form</a> to access additional resources. Don't forget to join the <a href="https://meshery.io/calendar">Newcomers meeting</a> held every Thursday!</p>
 <img src="https://raw.githubusercontent.com/meshery/meshery/refs/heads/master/.github/assets/images/readme/community.png" style="margin:10px;" width="180px" alt="Community" align="right" />
-<p>
-✔️ <b>Star</b> ⭐ the main <a href="https://github.com/meshery/meshery">meshery repo</a><br />
-✔️ <b>Join</b> any or all of the weekly meetings on the <a href="https://meet.meshery.io">community calendar</a><br />
-✔️ <b>Watch</b> <a href="https://www.youtube.com/@mesheryio?sub_confirmation=1">community meeting recordings</a><br />
-✔️ <b>Access</b> resources by completing a <a href="https://meshery.io/newcomers">community member form</a><br />
-✔️ <b>Discuss</b> in the Meshery <a href="https://discuss.meshery.io">community forum</a><br />
-✔️ Not sure where to start? <b>Grab</b> an open issue with the <a href="https://github.com/issues?q=is%3Aopen+is%3Aissue+archived%3Afalse+(org%3Ameshery+OR+org%3Aservice-mesh-performance+OR+org%3Aservice-mesh-patterns+OR+org%3Ameshery-extensions)+label%3A%22help+wanted%22">help-wanted label</a>
-</p>
-</div>
 
-<img src="https://raw.githubusercontent.com/meshery/.github/master/profile/assets/img/footer.png" alt="" />
+- ✔️ [Star](https://github.com/meshery-extensions/meshery-mcp-server/stargazers)
+  the repo
+- ✔️ [Join](https://meshery.io/newcomers) the community
+- ✔️ [Watch](https://www.youtube.com/@mesheryio?sub_confirmation=1) community
+  meeting recordings
+- ✔️ [Discuss](https://discuss.meshery.io) in the Meshery forum
+- ✔️ Grab an open [help-wanted
+  issue](https://github.com/issues?q=is%3Aopen+is%3Aissue+archived%3Afalse+(org%3Ameshery+OR+org%3Aservice-mesh-performance+OR+org%3Aservice-mesh-patterns+OR+org%3Ameshery-extensions)+label%3A%22help+wanted%22)
