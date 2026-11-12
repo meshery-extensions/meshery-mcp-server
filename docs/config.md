@@ -165,6 +165,35 @@ Logs are written to **stderr**. Stdout is reserved for MCP protocol messages, so
 | `warn` | Warnings and errors only |
 | `error` | Errors only |
 
+## MCP server
+
+The MCP server is built on the official
+[github.com/modelcontextprotocol/go-sdk](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp)
+v1.8.0, targeting protocol revision **2026-07-28** with backward-compatible
+negotiation down to 2025-11-25 (see [docs/adr/0001-mcp-sdk-choice.md](../adr/0001-mcp-sdk-choice.md)).
+
+### Transports
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--transport stdio` | `stdio` | JSON-RPC over stdin/stdout. For local AI clients such as Claude Desktop. Logs go to stderr. |
+| `--transport http` | | Streamable HTTP (stateless mode) on `--port`. For remote clients. |
+
+Examples:
+
+```sh
+# stdio (default)
+meshery-mcp-server
+
+# Streamable HTTP on port 8080
+meshery-mcp-server --transport http --port 8080
+```
+
+### Protocol version
+
+The server advertises `2026-07-28`. The SDK negotiates down to `2025-11-25`
+for older clients, so existing MCP clients continue to work.
+
 ## Errors
 
 Configuration problems stop the server at startup. Each error is logged with a short description, the probable cause and a suggested fix.
