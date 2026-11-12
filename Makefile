@@ -47,6 +47,12 @@ coverage:
 clean:
 	rm -rf bin coverage.txt
 
+.PHONY: docs-lint
+## Lint Markdown files with markdownlint.
+docs-lint:
+	@command -v markdownlint >/dev/null || { echo "markdownlint not found: https://github.com/DavidAnson/markdownlint-cli"; exit 1; }
+	markdownlint README.md docs/
+
 # ---------------------------------------------------------------------------
 # LOCAL BUILDS
 # ---------------------------------------------------------------------------
