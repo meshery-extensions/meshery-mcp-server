@@ -7,10 +7,12 @@ import (
 )
 
 const (
-	ErrReadConfigFileCode    = "replace_me"
-	ErrDecodeConfigCode      = "replace_me"
-	ErrInvalidMesheryURLCode = "replace_me"
-	ErrInvalidLogLevelCode   = "replace_me"
+	ErrReadConfigFileCode            = "replace_me"
+	ErrDecodeConfigCode              = "replace_me"
+	ErrInvalidMesheryURLCode         = "replace_me"
+	ErrInvalidLogLevelCode           = "replace_me"
+	ErrInvalidMaxConcurrentCallsCode = "replace_me"
+	ErrInvalidMaxRetriesCode         = "replace_me"
 )
 
 // ErrReadConfigFile is returned when the --config file cannot be read or parsed.
@@ -48,4 +50,24 @@ func ErrInvalidLogLevel(level string) error {
 		[]string{fmt.Sprintf("Log level %q is not supported", level)},
 		[]string{"LOG_LEVEL or log.level has a typo"},
 		[]string{"Set LOG_LEVEL to one of: debug, info, warn, error"})
+}
+
+// ErrInvalidMaxConcurrentCalls is returned when meshery.max_concurrent_calls
+// / MESHERY_MAX_CONCURRENT_CALLS is less than 1.
+func ErrInvalidMaxConcurrentCalls(value int) error {
+	return errors.New(ErrInvalidMaxConcurrentCallsCode, errors.Alert,
+		[]string{"Invalid max concurrent calls"},
+		[]string{fmt.Sprintf("max_concurrent_calls is %d, must be at least 1", value)},
+		[]string{"MESHERY_MAX_CONCURRENT_CALLS / meshery.max_concurrent_calls is too small"},
+		[]string{"Set it to an integer >= 1"})
+}
+
+// ErrInvalidMaxRetries is returned when meshery.max_retries /
+// MESHERY_MAX_RETRIES is negative.
+func ErrInvalidMaxRetries(value int) error {
+	return errors.New(ErrInvalidMaxRetriesCode, errors.Alert,
+		[]string{"Invalid max retries"},
+		[]string{fmt.Sprintf("max_retries is %d, must not be negative", value)},
+		[]string{"MESHERY_MAX_RETRIES / meshery.max_retries is negative"},
+		[]string{"Set it to an integer >= 0"})
 }
