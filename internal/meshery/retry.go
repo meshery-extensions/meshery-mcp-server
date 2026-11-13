@@ -45,7 +45,7 @@ type Backoff struct {
 // (base * 2^attempt) plus jitter in [0, base), capped at Cap.
 func (b Backoff) Delay(attempt int) time.Duration {
 	delay := b.Base
-	for i := 0; i < attempt; i++ {
+	for i := 0; i < attempt && delay < b.Cap; i++ {
 		delay *= 2
 	}
 	//nolint:gosec // G404: jitter for backoff does not require cryptographic randomness

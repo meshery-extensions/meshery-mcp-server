@@ -60,7 +60,7 @@ func newMockCloud(t *testing.T, steps ...scenario) (*httptest.Server, *mockCloud
 func TestListDesigns(t *testing.T) {
 	srv, mock := newMockCloud(t, scenario{
 		status: 200,
-		body:   `{"patterns":[{"id":"d1","name":"bookinfo","version":"v1beta2","displayName":"Bookinfo","status":"enabled"},{"id":"d2","name":"istio","version":"v1beta2","displayName":"Istio","status":"enabled"}],"totalCount":2}`,
+		body:   `{"patterns":[{"id":"d1","name":"bookinfo","version":"v1beta2","displayName":"Bookinfo","status":"enabled"},{"id":"d2","name":"istio","version":"v1beta2","displayName":"Istio","status":"enabled"}],"total_count":2}`,
 	})
 	defer srv.Close()
 
@@ -89,6 +89,9 @@ func TestListDesigns(t *testing.T) {
 	}
 	if len(result.Designs) != 2 {
 		t.Errorf("expected 2 designs, got %d", len(result.Designs))
+	}
+	if result.Total != 2 {
+		t.Errorf("expected total 2, got %d", result.Total)
 	}
 	if result.Designs[0].Name != "bookinfo" {
 		t.Errorf("expected first design bookinfo, got %s", result.Designs[0].Name)

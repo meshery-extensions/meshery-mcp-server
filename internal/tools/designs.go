@@ -81,8 +81,8 @@ func NewDesignTools(client *meshery.Client) []Tool {
 
 				var pageResp struct {
 					Page     int             `json:"page"`
-					PageSize int             `json:"pageSize"`
-					Total    int             `json:"totalCount"`
+					PageSize int             `json:"page_size"`
+					Total    int             `json:"total_count"`
 					Patterns []DesignSummary `json:"patterns"`
 				}
 				if err := json.Unmarshal(body, &pageResp); err != nil {
