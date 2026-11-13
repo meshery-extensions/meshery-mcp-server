@@ -23,19 +23,21 @@ builds:
       goarch: arm64
 
 archives:
-  - id: default
-    name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
+- id: default
+  name_template: >-
+    {{ .ProjectName }}_{{ .Version }}_
+    {{- title .Os }}_
+    {{- if eq .Arch "amd64" }}x86_64
+    {{- else }}{{ .Arch }}{{ end }}
+  formats: [tar.gz]
+  format_overrides:
+    - goos: windows
+      formats: [zip]
 
 checksum:
   name_template: 'checksums.txt'
+sbom:
+  - cyclonedx
 snapshot:
   version_template: "{{ .Tag }}-next"
 changelog:
@@ -45,12 +47,21 @@ changelog:
     - '^docs:'
     - '^test:'
 
-# TODO: add a `dockers` section publishing ghcr.io/meshery-extensions/meshery-mcp-server
-# once a Dockerfile exists.
+dockers:
+- id: meshery-mcp-server
+  goos: linux
+  goarch: amd64
+  dockerfile: Dockerfile
+  image_templates:
+    - "ghcr.io/meshery-extensions/meshery-mcp-server:{{ .Tag }}"
+    - "ghcr.io/meshery-extensions/meshery-mcp-server:latest"
+  build_flag_templates:
+    - "--pull"
+    - "--label=org.opencontainers.image.created={{ .Timestamp }}"
+    - "--label=org.opencontainers.image.version={{ .Tag }}"
+    - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+    - "--label=org.opencontainers.image.title={{ .ProjectName }}"
 
 release:
-  # Must match `name-template` in .github/release-drafter.yml. GoReleaser finds the
-  # Release Drafter draft by this name, uploads the artifacts to it, keeps its notes
-  # (default `mode: keep-existing`), and publishes it.
   name_template: "Meshery MCP Server {{.Tag}}"
   use_existing_draft: true
