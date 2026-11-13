@@ -15,6 +15,7 @@ const (
 	FamilyContentItems RouteFamily = "content_items"
 	FamilyEventsWrite  RouteFamily = "events_write"
 	FamilyEventsRead   RouteFamily = "events_read"
+	FamilyDesigns      RouteFamily = "designs"
 	FamilyOther        RouteFamily = "other"
 )
 
@@ -36,6 +37,8 @@ func FamilyForRoute(method, path string) RouteFamily {
 			return FamilyEventsRead
 		}
 		return FamilyEventsWrite
+	case strings.Contains(p, "/api/content/patterns") || strings.Contains(p, "/api/pattern"):
+		return FamilyDesigns
 	}
 	return FamilyOther
 }

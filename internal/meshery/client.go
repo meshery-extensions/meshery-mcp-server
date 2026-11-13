@@ -17,6 +17,8 @@ import (
 // requested keychains. The header name is pending Cloud's contract.
 const HeaderKeychainScope = "Meshery-Keychain-Scope"
 
+const HeaderToken = "meshery"
+
 type callerIDKey struct{}
 
 // WithCallerID returns a context carrying the authenticated user id that
