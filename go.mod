@@ -7,7 +7,7 @@ require (
 	github.com/meshery/meshkit v1.0.24
 	github.com/meshery/schemas v1.4.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/sirupsen/logrus v1.9.4-0.20230606125235-dd1b4c2e81af
+	github.com/sirupsen/logrus v1.10.2
 	github.com/spf13/viper v1.21.0
 )
 
@@ -61,7 +61,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
