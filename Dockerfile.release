@@ -1,0 +1,3 @@
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY meshery-mcp-server /meshery-mcp-server
+ENTRYPOINT ["/meshery-mcp-server"]

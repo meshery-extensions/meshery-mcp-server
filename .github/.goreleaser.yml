@@ -36,8 +36,8 @@ archives:
 
 checksum:
   name_template: 'checksums.txt'
-sbom:
-  - cyclonedx
+sboms:
+  - artifacts: archive
 snapshot:
   version_template: "{{ .Tag }}-next"
 changelog:
@@ -51,7 +51,7 @@ dockers:
 - id: meshery-mcp-server
   goos: linux
   goarch: amd64
-  dockerfile: Dockerfile
+  dockerfile: Dockerfile.release
   image_templates:
     - "ghcr.io/meshery-extensions/meshery-mcp-server:{{ .Tag }}"
     - "ghcr.io/meshery-extensions/meshery-mcp-server:latest"
@@ -61,6 +61,8 @@ dockers:
     - "--label=org.opencontainers.image.version={{ .Tag }}"
     - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+docker_signs:
+- artifacts: all
 
 release:
   name_template: "Meshery MCP Server {{.Tag}}"
