@@ -6,7 +6,7 @@ Build, test, and contribute to meshery-mcp-server.
 
 | Tool | Version | Needed for |
 | :--- | :------ | :---------- |
-| [Go](https://go.dev/doc/install) | as declared in [`go.mod`](go.mod) | Building and testing |
+| [Go](https://go.dev/doc/install) | as declared in [`go.mod`](../go.mod) | Building and testing |
 | [golangci-lint](https://golangci-lint.run/welcome/install/) | v2.x | `make lint` |
 | [Docker](https://docs.docker.com/get-docker/) | any recent version | Container builds |
 | [markdownlint](https://github.com/DavidAnson/markdownlint-cli) | any recent version | `make docs-lint` |
@@ -59,12 +59,12 @@ Every pull request runs three CI jobs (`.github/workflows/build-and-test.yml`):
    -covermode=atomic ./...`.
 3. **Test Docker Image Build** — `make docker-run < /dev/null`
 
-The test job runs on a matrix of Go versions (currently `1.27` and `1.26`).
+The test job runs on Go 1.27 (add versions to the matrix in `build-and-test.yml` once `go.mod` allows them).
 
 ## Release process
 
 Releases are cut by pushing a version tag (`v0.1.0`, `v0.1.1`, etc.) to
-`main`. The [`.github/workflows/release.yml`](.github/workflows/release.yml)
+`main`. The [`.github/workflows/release.yml`](../.github/workflows/release.yml)
 workflow runs GoReleaser, which:
 
 1. Builds binaries for `linux/amd64`, `linux/arm64`,

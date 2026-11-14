@@ -7,7 +7,7 @@ Meshery server via HTTP(S) using the `MESHERY_SERVER_URL` and
 
 ## Prerequisites
 
-- **Go 1.27.1 or newer** (as declared in [`go.mod`](go.mod)) — required for
+- **Go 1.27.1 or newer** (as declared in [`go.mod`](../go.mod)) — required for
   building from source
 - **Docker** — required for the container image
 - **cosign** (optional) — required for verifying signatures on release artifacts
@@ -74,7 +74,7 @@ docker run -i --rm \
 ```
 
 The image runs as a non-root user (UID 65532) and is built from
-[`Dockerfile`](Dockerfile) using `CGO_ENABLED=0` for a static, minimal
+[`Dockerfile`](../Dockerfile) using `CGO_ENABLED=0` for a static, minimal
 runtime image.
 
 ## Verify the installation
@@ -92,4 +92,4 @@ emitted in the startup log line via build-time `-ldflags`.
 ## Next steps
 
 Once the server is running, connect an MCP client such as Claude Desktop using
-the configuration described in [docs/config.md](docs/config.md#from-an-ai-app-mcp-client).
+the configuration described in [docs/config.md](config.md#from-an-ai-app-mcp-client).
