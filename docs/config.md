@@ -8,6 +8,9 @@ meshery-mcp-server reads its configuration once, at startup. To change a setting
 |---|---|---|---|---|
 | Meshery server URL | `MESHERY_SERVER_URL` | `meshery.url` | `http://localhost:9081` | An `http://` or `https://` URL with a host |
 | Meshery provider token | `MESHERY_API_TOKEN` | `meshery.token` | *(none)* | Any string; optional |
+| Keychain scope | `MESHERY_KEYCHAIN_SCOPE` | `meshery.keychain_scope` | *(none)* | Comma-separated keychain ids/names; empty = unscoped token (previous behavior) |
+| Max concurrent Cloud calls per tool | `MESHERY_MAX_CONCURRENT_CALLS` | `meshery.max_concurrent_calls` | `4` | Integer >= 1 |
+| Max Cloud retries per call | `MESHERY_MAX_RETRIES` | `meshery.max_retries` | `3` | Integer >= 0 |
 | Log level | `LOG_LEVEL` | `log.level` | `info` | `debug`, `info`, `warn`, `error` (case-insensitive) |
 
 The **Meshery server URL** is the address of the Meshery server this MCP server sends requests to. It is not an address this server listens on: over stdio, the server has no network address of its own.
@@ -63,6 +66,53 @@ The token is a credential. The server never prints it: it is redacted as `[REDAC
 - **If you put it in a file**, restrict the file to your user (`chmod 600`) and never commit it.
 - **With Docker**, pass it as `-e MESHERY_API_TOKEN` with no `=value`. Docker then copies the value from its own environment, so the token never appears in the command line or in process listings.
 - **Never bake it into an image** with `ENV` or `--build-arg`. Build arguments are recorded in the image and readable with `docker history`.
+
+## Cloud API-token behavior
+
+When `MESHERY_SERVER_URL` points at Meshery Cloud, the client behaves as follows:
+
+**Keychain-scoped tokens (#6369).** `meshery.keychain_scope` / `MESHERY_KEYCHAIN_SCOPE` requests the narrowest
+keychain scope the deployment needs; it defaults to empty, which means no
+keychain scope and the previous, unscoped behavior. A scoped token receives
+403 on any route that makes no key check.
+
+A Cloud 403 is treated as "insufficient scope", never as "bad token", so it
+never triggers sign-in. When Cloud's response identifies the missing scope
+or key, the error names it and tells the operator to grant it (or to set
+`MESHERY_KEYCHAIN_SCOPE`); when it does not, the error says so.
+
+**Per-user rate limits (#6333).** Cloud enforces a token bucket per (route
+family, caller). Concurrent Cloud calls are bound per tool
+(`meshery.max_concurrent_calls`, default 4) so one tool invocation—or a
+batch—cannot flood a route family. On 429 the client honors `Retry-After`
+(delta-seconds or HTTP-date); without it, it backs off exponentially with
+jitter (capped at 8s). Retries are bounded (default 3), context-aware, and
+never a tight loop; exhausted retries surface
+"rate limited by Cloud; retry after N seconds". 429 is not an auth failure.
+
+**Revocation (#6381).** `POST /revoke` retires Cloud-issued tokens
+immediately. As soon as the user revokes, the cached token is dropped
+client-side (memory; disk/keyring/session stores are emptied the same way)
+regardless of the server's response. Revocation succeeds only when Cloud
+answers 200; 503 is retried with backoff, never reported as success.
+401 remains the only re-auth signal.
+
+**IdP outage (#6366).** Cloud answers 503 on an identity-provider outage
+instead of 401. The client backs off on 503 (bounded retries with jitter)
+and surfaces "service unavailable". A 503 is never treated as "token
+revoked" or "token invalid": no stored credentials are cleared and no sign-in
+is forced. Cloud caches active introspection for at most 60s, so the client
+adds no longer client-side validity cache; only safe caches exist, evicted
+on revoke.
+
+## Troubleshooting
+
+| Status | Meaning | What to do |
+|--------|---------|------------|
+| 401 | Token missing, expired or revoked | Sign in again (Cloud OAuth); this is the only status that triggers re-auth |
+| 403 | Insufficient keychain scope | Grant the missing scope named in the error, or set `MESHERY_KEYCHAIN_SCOPE` to the narrowest scope the deployment needs; do not re-auth |
+| 429 | Rate limited | Wait for `Retry-After` (or the backoff) and retry; reduce `meshery.max_concurrent_calls` if batches keep hitting it |
+| 503 | Cloud service unavailable | Retry later; no credential changes are made |
 
 ## Usage
 

@@ -24,32 +24,53 @@ func TestLoad(t *testing.T) {
 	const fileYAML = "meshery:\n  url: https://file.example:9081\n  token: file-token\nlog:\n  level: warn\n"
 
 	tests := []struct {
-		name      string
-		envURL    string
-		envToken  string
-		envLevel  string
-		fileYAML  string // "" = no config file
-		path      string // explicit path; overrides fileYAML
-		wantURL   string
-		wantToken Secret
-		wantLevel string
-		wantErr   string // expected short description; "" = expect success
+		name              string
+		envURL            string
+		envToken          string
+		envLevel          string
+		envKeychainScope  string
+		envMaxConcurrent  string
+		envMaxRetries     string
+		fileYAML          string // "" = no config file
+		path              string // explicit path; overrides fileYAML
+		wantURL           string
+		wantToken         Secret
+		wantLevel         string
+		wantKeychainScope string
+		wantMaxConcurrent int
+		wantMaxRetries    int
+		wantErr           string // expected short description; "" = expect success
 	}{
-		{name: "defaults only", wantURL: defaultMesheryURL, wantLevel: LogLevelInfo},
+		{name: "defaults only", wantURL: defaultMesheryURL, wantLevel: LogLevelInfo,
+			wantMaxConcurrent: defaultMaxConcurrentCalls, wantMaxRetries: defaultMaxRetries},
 		{name: "env overrides default", envURL: "https://env.example", envToken: "env-token", envLevel: "debug",
-			wantURL: "https://env.example", wantToken: "env-token", wantLevel: LogLevelDebug},
+			wantURL: "https://env.example", wantToken: "env-token", wantLevel: LogLevelDebug,
+			wantMaxConcurrent: defaultMaxConcurrentCalls, wantMaxRetries: defaultMaxRetries},
 		{name: "file only", fileYAML: fileYAML,
-			wantURL: "https://file.example:9081", wantToken: "file-token", wantLevel: LogLevelWarn},
+			wantURL: "https://file.example:9081", wantToken: "file-token", wantLevel: LogLevelWarn,
+			wantMaxConcurrent: defaultMaxConcurrentCalls, wantMaxRetries: defaultMaxRetries},
 		{name: "env beats file per key", fileYAML: fileYAML, envURL: "https://env.example",
-			wantURL: "https://env.example", wantToken: "file-token", wantLevel: LogLevelWarn},
+			wantURL: "https://env.example", wantToken: "file-token", wantLevel: LogLevelWarn,
+			wantMaxConcurrent: defaultMaxConcurrentCalls, wantMaxRetries: defaultMaxRetries},
 		{name: "log level is case-insensitive", envLevel: " DEBUG ",
-			wantURL: defaultMesheryURL, wantLevel: LogLevelDebug},
+			wantURL: defaultMesheryURL, wantLevel: LogLevelDebug,
+			wantMaxConcurrent: defaultMaxConcurrentCalls, wantMaxRetries: defaultMaxRetries},
+		{name: "keychain scope from env", envKeychainScope: "org:admin",
+			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo, wantKeychainScope: "org:admin",
+			wantMaxConcurrent: defaultMaxConcurrentCalls, wantMaxRetries: defaultMaxRetries},
+		{name: "max concurrent calls from env", envMaxConcurrent: "8",
+			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo, wantMaxConcurrent: 8, wantMaxRetries: defaultMaxRetries},
+		{name: "max retries from env", envMaxRetries: "7",
+			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo, wantMaxRetries: 7, wantMaxConcurrent: defaultMaxConcurrentCalls},
 		{name: "repo config_example.yml loads", path: filepath.Join("..", "..", "config_example.yml"),
-			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo},
+			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo,
+			wantMaxConcurrent: defaultMaxConcurrentCalls, wantMaxRetries: defaultMaxRetries},
 		{name: "invalid scheme", envURL: "ftp://x", wantErr: "Invalid Meshery server URL"},
 		{name: "missing scheme", envURL: "localhost:9081", wantErr: "Invalid Meshery server URL"},
 		{name: "unparsable URL", envURL: "http://u:p@host:90x81", wantErr: "Invalid Meshery server URL"},
 		{name: "invalid log level", envLevel: "verbose", wantErr: "Invalid log level"},
+		{name: "max concurrent calls below 1", envMaxConcurrent: "0", wantErr: "Invalid max concurrent calls"},
+		{name: "max retries negative", envMaxRetries: "-1", wantErr: "Invalid max retries"},
 		{name: "missing file", path: filepath.Join(t.TempDir(), "nope.yaml"), wantErr: "Unable to read the config file"},
 	}
 
@@ -58,6 +79,9 @@ func TestLoad(t *testing.T) {
 			// Always set all: an empty value counts as unset.
 			t.Setenv(envMesheryURL, tt.envURL)
 			t.Setenv(envMesheryToken, tt.envToken)
+			t.Setenv(envMesheryKeychainScope, tt.envKeychainScope)
+			t.Setenv(envMesheryMaxConcurrentCalls, tt.envMaxConcurrent)
+			t.Setenv(envMesheryMaxRetries, tt.envMaxRetries)
 			t.Setenv(envLogLevel, tt.envLevel)
 
 			path := tt.path
@@ -83,6 +107,15 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.Log.Level != tt.wantLevel {
 				t.Errorf("Log.Level = %q, want %q", cfg.Log.Level, tt.wantLevel)
+			}
+			if cfg.Meshery.KeychainScope != tt.wantKeychainScope {
+				t.Errorf("KeychainScope = %q, want %q", cfg.Meshery.KeychainScope, tt.wantKeychainScope)
+			}
+			if cfg.Meshery.MaxConcurrentCalls != tt.wantMaxConcurrent {
+				t.Errorf("MaxConcurrentCalls = %d, want %d", cfg.Meshery.MaxConcurrentCalls, tt.wantMaxConcurrent)
+			}
+			if cfg.Meshery.MaxRetries != tt.wantMaxRetries {
+				t.Errorf("MaxRetries = %d, want %d", cfg.Meshery.MaxRetries, tt.wantMaxRetries)
 			}
 		})
 	}

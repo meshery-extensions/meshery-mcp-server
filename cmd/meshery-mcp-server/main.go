@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/meshery-extensions/meshery-mcp-server/internal/config"
+	"github.com/meshery-extensions/meshery-mcp-server/internal/meshery"
 )
 
 const appName = "meshery-mcp-server"
@@ -49,7 +50,19 @@ func run(log logger.Handler) error {
 	log.Infof("starting %s version=%s commit=%s meshery_url=%s token_configured=%t",
 		appName, version, commitsha, cfg.Meshery.URL, cfg.Meshery.Token != "")
 
-	// TODO: create Meshery client, MCP server; serve over stdio.
+	client := meshery.NewClient(
+		cfg.Meshery.URL,
+		string(cfg.Meshery.Token),
+		meshery.WithKeychainScope(cfg.Meshery.KeychainScope),
+		meshery.WithMaxConcurrentCalls(cfg.Meshery.MaxConcurrentCalls),
+		meshery.WithMaxRetries(cfg.Meshery.MaxRetries),
+		meshery.WithLogger(log),
+	)
+	log.Infof("meshery cloud client ready: keychain_scope=%q max_concurrent_calls=%d max_retries=%d",
+		cfg.Meshery.KeychainScope, cfg.Meshery.MaxConcurrentCalls, cfg.Meshery.MaxRetries)
+
+	// TODO: create MCP server; serve over stdio using `client`.
+	_ = client
 	return nil
 }
 
