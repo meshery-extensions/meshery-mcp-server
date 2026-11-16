@@ -27,15 +27,15 @@ It is an official [Meshery Extension](https://meshery.io/extensions), written in
 ## Project status
 
 > [!NOTE]
-> **Early development.** The MCP server runs over stdio and over Streamable HTTP on localhost, but it does not call Meshery yet: its tools are placeholders that return a "not implemented" error.
+> **Early development.** The MCP server runs over stdio, but it does not call Meshery yet: its tools are placeholders that return a "not implemented" error.
 
 | Area | Status |
 |---|---|
 | Configuration (env vars, config file, flags), logging, Meshery-style errors | ✅ Done |
 | Build, lint, tests, container image, CI | ✅ Done |
 | MCP server over stdio | ✅ Done |
-| MCP server over Streamable HTTP, localhost only, with an access key | ✅ Done |
-| Remote HTTP with MCP authorization (OAuth) | Planned |
+| Streamable HTTP transport | ✅ Done |
+| MCP authorization (OAuth) for HTTP, with Meshery Cloud login | In progress |
 | Meshery API client | Planned |
 | MCP tools | Placeholders (return "not implemented") |
 | MCP resources and prompts | Planned |
@@ -88,9 +88,9 @@ These will be exposed through MCP's three building blocks:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-By default the MCP client launches the server and talks to it over stdin/stdout, so the server does not listen on any network address. With `--transport http` it listens instead at `http://127.0.0.1:8080/mcp`, on loopback only, and every request must carry an access key. Because stdout carries the protocol over stdio, all logs go to stderr.
+By default the MCP client launches the server and talks to it over stdin/stdout, so the server does not listen on any network address. With `--transport http` it serves Streamable HTTP instead, and each client authorizes through MCP authorization (OAuth). Because stdout carries the protocol over stdio, all logs go to stderr.
 
-Only `cmd/meshery-mcp-server` wires the packages together. `internal/config` is the only package that reads environment variables or the config file; the other packages receive plain values from `main`. See [docs/config.md](docs/config.md#for-contributors) for details.
+Only `cmd/meshery-mcp-server` wires the packages together. `internal/config` is the only package that reads environment variables or the config file; `main` hands the other packages the values they need. See [docs/config.md](docs/config.md#for-contributors) for details.
 
 ## Repository structure
 
@@ -145,11 +145,11 @@ The server works with no configuration if Meshery runs at `http://localhost:9081
 | Variable | Default | Purpose |
 |---|---|---|
 | `MESHERY_SERVER_URL` | `http://localhost:9081` | Meshery server to connect to |
-| `MESHERY_API_TOKEN` | *(none)* | Meshery provider token. Environment only; never in the config file |
-| `MESHERY_MCP_TRANSPORT` | `stdio` | `stdio` or `http`; also `--transport` |
+| `MESHERY_API_TOKEN` | *(none)* | Meshery provider token. stdio only (refused with `http`). Environment only; never in the config file |
+| `MESHERY_PROVIDER` | `Local` without a token, `Meshery` with one | Meshery provider the token belongs to. stdio only |
+| `MESHERY_MCP_TRANSPORT` | `stdio` | `stdio` or `http` (requires MCP authorization); also `--transport` |
 | `MESHERY_MCP_HOST` | `127.0.0.1` | HTTP only, loopback addresses only; also `--host` |
 | `MESHERY_MCP_PORT` | `8080` | HTTP only; also `--port` |
-| `MESHERY_MCP_ACCESS_KEY` | *(none)* | HTTP only, required: the bearer token clients must send. Environment only |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `LOG_FORMAT` | `text` | `text` for development, `json` for log collectors |
 
@@ -173,17 +173,10 @@ make run ARGS="--config config.local.yaml"
 This prints a startup line to stderr, then serves MCP over stdin/stdout until stdin closes or you press Ctrl+C:
 
 ```text
-time="..." level=info msg="starting meshery-mcp-server version=... commit=... meshery_url=http://localhost:9081 token_configured=false transport=stdio" app=meshery-mcp-server
+time="..." level=info msg="starting meshery-mcp-server version=... commit=... meshery_url=http://localhost:9081 transport=stdio provider=Local token_configured=false" app=meshery-mcp-server
 ```
 
-To serve Streamable HTTP on localhost instead:
-
-```sh
-export MESHERY_MCP_ACCESS_KEY="$(openssl rand -hex 32)"
-make run ARGS="--transport http --port 8080"   # http://127.0.0.1:8080/mcp
-```
-
-Clients must send `Authorization: Bearer $MESHERY_MCP_ACCESS_KEY`. To call the tools by hand, use the MCP Inspector: `npx @modelcontextprotocol/inspector ./bin/meshery-mcp-server` for stdio, or start it without arguments and connect to the HTTP URL with that header.
+To call the tools by hand, use the MCP Inspector: `npx @modelcontextprotocol/inspector ./bin/meshery-mcp-server`.
 
 ### 4. Run in a container
 
@@ -191,7 +184,7 @@ Clients must send `Authorization: Bearer $MESHERY_MCP_ACCESS_KEY`. To call the t
 make docker-run
 ```
 
-This builds the image and runs it over stdio. Inside a container, `localhost` refers to the container itself, so `make docker-run` points the server at `http://host.docker.internal:9081` by default. Override it with `DOCKER_MESHERY_SERVER_URL`. `MESHERY_API_TOKEN` is forwarded from your shell.
+This builds the image and runs it over stdio. Inside a container, `localhost` refers to the container itself, so `make docker-run` points the server at `http://host.docker.internal:9081` by default. Override it with `DOCKER_MESHERY_SERVER_URL`. `MESHERY_API_TOKEN` and `MESHERY_PROVIDER` are forwarded from your shell.
 
 ### 5. Connect an MCP client
 

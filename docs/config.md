@@ -7,11 +7,11 @@ meshery-mcp-server reads its configuration once, at startup. To change a setting
 | Setting | Flag | Environment variable | Config file key | Default | Accepted values |
 |---|---|---|---|---|---|
 | Meshery server URL | | `MESHERY_SERVER_URL` | `meshery.url` | `http://localhost:9081` | An `http://` or `https://` URL with a host |
-| Meshery provider token | | `MESHERY_API_TOKEN` | *(not allowed)* | *(none)* | Any string |
-| Transport | `--transport` | `MESHERY_MCP_TRANSPORT` | `transport.mode` | `stdio` | `stdio`, `http` (case-insensitive) |
-| HTTP host | `--host` | `MESHERY_MCP_HOST` | `transport.host` | `127.0.0.1` | A loopback address: `127.0.0.1`, `::1`, `localhost` |
-| HTTP port | `--port` | `MESHERY_MCP_PORT` | `transport.port` | `8080` | `1`–`65535` |
-| HTTP access key | | `MESHERY_MCP_ACCESS_KEY` | *(not allowed)* | *(none)* | At least 32 characters; required for `http` |
+| Meshery provider token | | `MESHERY_API_TOKEN` | *(not allowed)* | *(none)* | Any string; `stdio` only (refused with `http`) |
+| Meshery provider | | `MESHERY_PROVIDER` | `transport.stdio.provider` | `Local` without a token, `Meshery` with one | A provider name Meshery registers, such as `Local` or `Meshery`; `stdio` only |
+| Transport | `--transport` | `MESHERY_MCP_TRANSPORT` | `transport.mode` | `stdio` | `stdio`, `http` (case-insensitive); `http` [requires MCP authorization](#over-http) |
+| HTTP host | `--host` | `MESHERY_MCP_HOST` | `transport.http.host` | `127.0.0.1` | A loopback address: `127.0.0.1`, `::1`, `localhost` |
+| HTTP port | `--port` | `MESHERY_MCP_PORT` | `transport.http.port` | `8080` | `1`–`65535` |
 | Log level | | `LOG_LEVEL` | `log.level` | `info` | `debug`, `info`, `warn`, `error` (case-insensitive) |
 | Log format | | `LOG_FORMAT` | `log.format` | `text` | `text`, `json` (case-insensitive) |
 
@@ -20,16 +20,19 @@ The **Meshery server URL** is the address of the Meshery server this MCP server 
 The **transport** is how MCP clients reach this server:
 
 - `stdio`: the AI app starts the server and talks to it over stdin/stdout. Only that app can reach it.
-- `http`: the server listens for [Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http) at `http://<host>:<port>/mcp`, on a loopback address only, and every request must carry the **HTTP access key**. See [Over HTTP (localhost)](#over-http-localhost). The deprecated HTTP+SSE transport is not supported.
+- `http`: the server serves [Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http) at `http://<host>:<port>/mcp`, and each client obtains its Meshery identity through MCP authorization (OAuth). See [Over HTTP](#over-http). The deprecated HTTP+SSE transport is not supported.
 
-**HTTP host**, **HTTP port** and **HTTP access key** apply to the `http` transport only; the access key is not even read otherwise.
+**HTTP host** and **HTTP port** apply to the `http` transport only.
 
-The **token** is how the server identifies itself to Meshery:
+The **provider** and the **token** together are how the server identifies itself to Meshery. Meshery picks the provider first (from the provider the server sends, unless the Meshery server pins one with its own `PROVIDER` variable), and that provider then checks the token. Both apply to the `stdio` transport only, which serves the one user who started the server:
 
-- **Set:** every request to Meshery is made as the user the token belongs to. That is correct only when the server serves that one user: over stdio, the app that started it; over HTTP, clients that hold the access key.
-- **Not set:** requests carry no token. Use this with Meshery's Local ("None") provider.
+- **Token set:** every request to Meshery is made as the user the token belongs to. Set the provider to the one that issued the token; it defaults to `Meshery`, Meshery's primary remote provider (`cloud.meshery.io`). The provider is never guessed from the token.
+- **Token not set:** requests carry no token, which only Meshery's Local provider accepts. The provider defaults to `Local`.
+- **Token set with the `Local` provider:** the server stops at startup. The Local provider ignores tokens, so every request would run as the local user instead of the token's owner.
 
-The token is read from the environment only, never from the config file. It is not stored on the Meshery client: it is attached to each request as it is handled, so a later transport that takes each caller's own identity needs no change to the client or the tools.
+Over `http`, the server may serve several clients, and none of them may act with the identity of whoever started it. Each client authorizes separately through OAuth, and the server obtains that user's Meshery token, and its provider, as part of the flow. `MESHERY_PROVIDER` and `transport.stdio.provider` are ignored, and a token is never taken from the environment or the config file: setting `MESHERY_API_TOKEN` with `--transport http` stops the server at startup rather than being silently ignored.
+
+The token is read from the environment only, never from the config file. It is not stored on the Meshery client: it is attached to each request as it is handled, so the `http` transport, which takes each client's own identity, uses the same client and tools.
 
 ## Where settings come from
 
@@ -41,7 +44,7 @@ built-in defaults  <  config file (--config)  <  environment variables  <  flags
 
 - Only the transport settings have flags.
 - A higher source overrides only the settings it actually sets. For example, a config file can set the log level while `MESHERY_SERVER_URL` overrides only the URL.
-- Secrets are the exception: the token comes from `MESHERY_API_TOKEN` only and the HTTP access key from `MESHERY_MCP_ACCESS_KEY` only. Neither has a flag, because command lines are visible to other users in process listings.
+- The token is the exception: it comes from `MESHERY_API_TOKEN` only. It has no flag, because command lines are visible to other users in process listings.
 - An environment variable set to an empty string counts as unset, so the file value or the default applies.
 - Invalid values stop the server at startup with an error that names the setting and how to fix it (see [Errors](#errors)).
 
@@ -61,8 +64,11 @@ meshery:
 
 transport:
   mode: stdio
-  host: 127.0.0.1
-  port: 8080
+  stdio:           # stdio transport only
+    provider: Meshery
+  http:            # http transport only
+    host: 127.0.0.1
+    port: 8080
 
 log:
   level: info
@@ -77,7 +83,7 @@ cp config_example.yml config.local.yaml
 
 `*.local.yaml`, `/config.yaml` and `*.env` are in `.gitignore`, so files with these names cannot be committed by accident.
 
-If `--config` points to a file that does not exist or is not valid YAML, the server exits with an error rather than silently falling back to the defaults. The same applies if the file contains a secret (`meshery.token`, `auth.token` or `transport.access_key`).
+If `--config` points to a file that does not exist or is not valid YAML, the server exits with an error rather than silently falling back to the defaults. The same applies if the file contains a token (`meshery.token`, `auth.token` or `transport.stdio.token`).
 
 ## Handling the token
 
@@ -86,8 +92,6 @@ The token is a credential. The server never prints it: it is redacted as `[REDAC
 - **Set it in the environment** (`MESHERY_API_TOKEN`). The config file cannot hold it: config files get copied, shared and committed, and the MCP specification expects stdio servers to take credentials from the environment.
 - **With Docker**, pass it as `-e MESHERY_API_TOKEN` with no `=value`. Docker then copies the value from its own environment, so the token never appears in the command line or in process listings.
 - **Never bake it into an image** with `ENV` or `--build-arg`. Build arguments are recorded in the image and readable with `docker history`.
-
-The same applies to `MESHERY_MCP_ACCESS_KEY`: environment only, never in the config file or on the command line.
 
 ## Usage
 
@@ -163,30 +167,15 @@ docker run -i --rm \
 
 The image runs as a non-root user (UID 65532), so the mounted file must be readable by others (`644`). It holds no token, so that is safe; the token is passed with `-e` as shown.
 
-### Over HTTP (localhost)
+### Over HTTP
 
-```sh
-export MESHERY_MCP_ACCESS_KEY="$(openssl rand -hex 32)"
-meshery-mcp-server --transport http              # http://127.0.0.1:8080/mcp
-meshery-mcp-server --transport http --port 9000  # http://127.0.0.1:9000/mcp
-```
-
-Point an MCP client that supports Streamable HTTP at the URL and configure it to send this header with every request:
-
-```
-Authorization: Bearer <the value of MESHERY_MCP_ACCESS_KEY>
-```
-
-The server stops cleanly on Ctrl+C or SIGTERM; a second Ctrl+C exits immediately.
+Over HTTP, every MCP client obtains its own Meshery identity through MCP authorization (OAuth): the client is sent through a Meshery login, and the server stores that user's Meshery token and issues the client a token of its own. The server never accepts a Meshery token from its environment, its config file, or a client (no token passthrough). Without MCP authorization configured, `--transport http` stops the server at startup with `meshery-mcp-server-1020` rather than serving clients that have no Meshery identity.
 
 The HTTP transport:
 
-- **Listens on loopback only.** `--host` must be `127.0.0.1`, `::1` or `localhost`; anything else stops the server at startup. Remote access needs MCP authorization (OAuth), which is not implemented yet.
-- **Requires the access key on every request.** Loopback keeps other machines out, but not other users or processes on this one. Without the key a request gets `401 Unauthorized`. This matters because every caller acts with your Meshery token, if one is set.
-- **Rejects requests from web pages.** Cross-origin browser requests and requests whose `Host` header is not localhost (DNS rebinding) get `403 Forbidden`, so a website you visit cannot call the server through your browser.
-- **Is stateless.** Each request stands alone; there are no sessions. `GET` and `DELETE` return `405 Method Not Allowed`, as protocol version 2026-07-28 expects. Clients on 2025 protocol versions are served the same way.
-
-Docker is not supported for the HTTP transport yet: inside a container, loopback is the container itself, and listening on any other address is refused.
+- **Listens on loopback only:** `--host` must be `127.0.0.1`, `::1` or `localhost`.
+- **Rejects requests from web pages.** Cross-origin browser requests and requests whose `Host` header is not localhost (DNS rebinding) get `403 Forbidden`.
+- **Is stateless.** Each request stands alone; there are no sessions. `GET` and `DELETE` return `405 Method Not Allowed`, as protocol version 2026-07-28 expects.
 
 ### During development (Makefile)
 
@@ -194,7 +183,7 @@ Docker is not supported for the HTTP transport yet: inside a container, loopback
 |---|---|
 | `make run` | Builds and runs the binary. Uses your shell's environment variables. |
 | `make run ARGS="--config config.local.yaml"` | Same, with flags passed through. |
-| `make docker-run` | Builds the image and runs it over stdio. Forwards `MESHERY_API_TOKEN` from your shell. |
+| `make docker-run` | Builds the image and runs it over stdio. Forwards `MESHERY_API_TOKEN` and `MESHERY_PROVIDER` from your shell. |
 
 `make docker-run` sets the URL from `DOCKER_MESHERY_SERVER_URL` (default `http://host.docker.internal:9081`), not from `MESHERY_SERVER_URL`. That way a `localhost` URL exported for native runs does not leak into the container, where it would point at the container itself. To override it:
 
@@ -219,41 +208,41 @@ Logs are written to **stderr**. Stdout is reserved for MCP protocol messages, so
 
 | Format | Use it for | Example |
 |---|---|---|
-| `text` | Development: easy to read in a terminal (default) | `time="2026-10-16T23:56:59-04:00" level=info msg="server run start" app=meshery-mcp-server` |
-| `json` | Production: one JSON object per line, for log collectors | `{"app":"meshery-mcp-server","level":"info","msg":"server run start","time":"2026-10-16T23:56:59-04:00"}` |
+| `text` | Development: easy to read in a terminal (default) | `time=2026-10-16T23:56:59-04:00 level=info msg="server run start" app=meshery-mcp-server` |
+| `json` | Production: one JSON object per line, for log collectors | `{"time":"2026-10-16T23:56:59-04:00","level":"info","msg":"server run start","app":"meshery-mcp-server"}` |
 
-Every line has the same four fields, `time`, `level`, `msg` and `app`, whether the server or the MCP SDK wrote it. Errors also carry `code`, `severity`, `short-description`, `probable-cause` and `suggested-remediation`.
+Every line has the same four fields, `time`, `level`, `msg` and `app`, whether the server or the MCP SDK wrote it, and the same RFC 3339 time format. Their order, and in `text` whether the time is quoted, depends on which of the two wrote the line. Errors also carry `code`, `severity`, `short-description`, `probable-cause` and `suggested-remediation`.
 
 At startup the server logs what it offers to MCP clients:
 
 ```text
-level=info msg="registered capabilities" tools="[search_components get_component list_models get_model list_relationships]" resources=[] prompts=[]
+time=2026-10-16T23:56:59-04:00 level=info msg="registered capabilities" app=meshery-mcp-server tools="[search_components get_component list_models get_model list_relationships]" resources=[] prompts=[]
 ```
 
 An error in the configuration itself is logged as `text` at `info` level, because the configured format and level are not known until the configuration has loaded.
 
 ## Errors
 
-Configuration problems and HTTP listen failures stop the server at startup; a slow HTTP shutdown is reported when the server stops. Each error is logged with a short description, the probable cause and a suggested fix.
+Configuration problems and HTTP listen failures stop the server at startup; a slow HTTP shutdown is reported when the server stops. Each error is logged with a short description, the probable cause and a suggested fix. This table lists those errors; the errors a tool returns to the AI (codes 1000–1009 and 1023–1027) are not logged at startup and are not listed here.
 
 | Code | Short description | Cause | Fix |
 |---|---|---|---|
 | `meshery-mcp-server-1010` | Unable to read the config file | The `--config` path does not exist, is not readable, or is not valid YAML | Check the path and the YAML syntax |
-| `meshery-mcp-server-1011` | Unable to decode configuration | A setting in the file or environment has the wrong type | Make `transport.port` / `MESHERY_MCP_PORT` a number and every other setting a plain string |
+| `meshery-mcp-server-1011` | Unable to decode configuration | A setting in the file or environment has the wrong type | Make `transport.http.port` / `MESHERY_MCP_PORT` a number and every other setting a plain string |
 | `meshery-mcp-server-1012` | Invalid Meshery server URL | Malformed URL, a scheme other than `http`/`https`, or no host | Use a URL like `http://localhost:9081` |
 | `meshery-mcp-server-1013` | Invalid log level | `LOG_LEVEL` / `log.level` is not a supported level | Use `debug`, `info`, `warn` or `error` |
-| `meshery-mcp-server-1014` | Token is not allowed in the config file | The config file sets `meshery.token` or `auth.token` | Remove it and set `MESHERY_API_TOKEN` instead |
+| `meshery-mcp-server-1014` | Token is not allowed in the config file | The config file sets `meshery.token`, `auth.token` or `transport.stdio.token` | Remove it and set `MESHERY_API_TOKEN` instead |
 | `meshery-mcp-server-1015` | Invalid transport | The transport is not `stdio` or `http` (for example the deprecated `sse`) | Use `stdio` or `http` |
-| `meshery-mcp-server-1016` | HTTP transport must listen on a loopback address | `--host` / `MESHERY_MCP_HOST` is not `127.0.0.1`, `::1` or `localhost` | Use a loopback address; remote access is not supported yet |
+| `meshery-mcp-server-1016` | HTTP transport must listen on a loopback address | `--host` / `MESHERY_MCP_HOST` is not `127.0.0.1`, `::1` or `localhost` | Use `127.0.0.1`, `::1` or `localhost` |
 | `meshery-mcp-server-1017` | Invalid port | `--port` / `MESHERY_MCP_PORT` is outside 1–65535 | Use a port between 1 and 65535 |
-| `meshery-mcp-server-1018` | HTTP access key is required | The transport is `http` and `MESHERY_MCP_ACCESS_KEY` is unset or shorter than 32 characters | Set it, for example to the output of `openssl rand -hex 32` |
-| `meshery-mcp-server-1019` | Access key is not allowed in the config file | The config file sets `transport.access_key` | Remove it and set `MESHERY_MCP_ACCESS_KEY` instead |
-| `meshery-mcp-server-1020` | Unable to listen for HTTP connections | The port is in use or the address is unavailable | Pick a free port or stop the process using it |
-| `meshery-mcp-server-1021` | HTTP access key is required | `RunHTTP` was called without an access key (config validation normally catches this first) | Set `MESHERY_MCP_ACCESS_KEY` |
+| `meshery-mcp-server-1018` | Invalid log format | `LOG_FORMAT` / `log.format` is not a supported format | Use `text` or `json` |
+| `meshery-mcp-server-1019` | Meshery token is not allowed with the http transport | `MESHERY_API_TOKEN` is set and the transport is `http` | Unset `MESHERY_API_TOKEN`, or use `stdio` |
+| `meshery-mcp-server-1020` | The http transport requires MCP authorization | The transport is `http` and MCP authorization (OAuth) is not configured | Configure MCP authorization, or use `stdio` and set `MESHERY_API_TOKEN` |
+| `meshery-mcp-server-1021` | Unable to listen for HTTP connections | The port is in use or the address is unavailable | Pick a free port or stop the process using it |
 | `meshery-mcp-server-1022` | HTTP server did not shut down cleanly | Requests were still running when the 5-second shutdown timeout ended | None needed; remaining connections were closed |
-| `meshery-mcp-server-1023` | Invalid log format | `LOG_FORMAT` / `log.format` is not a supported format | Use `text` or `json` |
+| `meshery-mcp-server-1028` | Meshery token is set with the Local provider | `MESHERY_API_TOKEN` is set and the provider (`MESHERY_PROVIDER` or `transport.stdio.provider`) is `Local`, or its legacy name `None` | Set the provider to the one the token belongs to, or unset `MESHERY_API_TOKEN` |
 
-Logs and error messages never include the token, the access key, or any password embedded in the URL: the startup line logs the URL with the password replaced by `xxxxx`.
+Logs and error messages never include the token or any password embedded in the URL: the startup line logs the URL with the password replaced by `xxxxx`.
 
 Error codes follow Meshery's conventions (`meshery-mcp-server-<number>`).
 
@@ -262,18 +251,20 @@ Error codes follow Meshery's conventions (`meshery-mcp-server-<number>`).
 ### How configuration is wired
 
 - `internal/config` is the only package that knows about Viper, environment variables or the config file. `config.Load(path, flags)` returns a validated `*config.Config` or an error.
-- `main` parses the flags, passes only the ones given on the command line to `config.Load` as `config.Flags`, and passes plain values to the packages that need them. Other packages never read configuration themselves.
+- `main` parses the flags, passes only the ones given on the command line to `config.Load` as `config.Flags`, and hands each package what it needs: plain values (the Meshery URL, the HTTP address), or a `config` type where that type is the contract (`auth.Resolver` takes `config.StdioConfig`; `internal/logging` takes the `config` level and format names). No other package reads environment variables or the config file.
 - `internal/mcp-server` knows nothing about `config`: `main` picks `RunStdio` or `RunHTTP` from `config.Transport` and builds `mcpserver.HTTPOptions`.
-- `config.Meshery` says where Meshery is; `config.Auth` says who is calling. They are kept apart on purpose: the Meshery client gets only the URL, and `auth.Resolver` turns `config.Auth` into a function the MCP server runs on every request to attach the caller's token to the request's `context`. The Meshery client reads it from there with `meshery.TokenFromContext`. Nothing built at startup holds a token, except that function when a token is set.
+- `config.Transport` holds the selected `Mode` and one sub-config per transport: `Stdio` and `HTTP`. A setting that applies to one transport lives under it; the token is read only for stdio. MCP authorization (OAuth) settings belong in `HTTPConfig`.
+- `config.Load` refuses `http` without MCP authorization. The unexported `load` resolves and validates the `http` settings regardless, and the tests use it.
+- `config.Meshery` says where Meshery is; the transport config says who is calling. They are kept apart on purpose: the Meshery client gets only the URL. For stdio, `auth.Resolver` turns `config.StdioConfig` into a function the MCP server runs on every request to attach `meshery.Credentials` (provider and token) to the request's `context`. The Meshery client reads them from there with `meshery.CredentialsFromContext`. Nothing built at startup holds a token, except that function when a token is set. Over http, each client's Meshery credentials are looked up from its OAuth grant.
 - The log level and format are stored as plain names (`"info"`, `"json"`, …), independent of any logging library. `internal/logging` turns them into the MeshKit logger the server uses and the `slog` logger the MCP SDK takes, both writing the same fields.
-- The token is a `config.Secret`, which redacts itself when printed or JSON-encoded. Convert it with `string(token)` only where it is actually used.
+- The token is a `config.Secret`, which redacts itself when printed (with any verb, `%#v` included) or JSON-encoded. Convert it with `string(token)` only where it is actually used.
 
 ### Adding a setting
 
-1. In `internal/config/config.go`, add a key constant (`"section.name"`) and an env var constant. The env var name is public: changing it breaks users' configs.
-2. Add a field with a `mapstructure` tag to the right struct.
+1. In `internal/config/config.go`, add a key constant (`"section.name"`) and an env var constant, and add the pair to `envBindings`. The env var name is public: changing it breaks users' configs. The tests clear every variable in `envBindings` before each case, so a new one needs no test changes to stay isolated.
+2. Add a field with a `mapstructure` tag to the right struct. A setting that only one transport uses goes in `StdioConfig` or `HTTPConfig`, with a key under `transport.stdio.` or `transport.http.`; validate it in that struct's checks, not for both transports.
 3. Call `v.SetDefault` for the key, with `""` if it has no default, so every setting and its default are listed in one place.
-4. Call `v.MustBindEnv(key, envVar)`. If the setting also has a flag, add a field to `config.Flags`, apply it with `v.Set` in `Load`, and register the flag in `main`. Secrets get no flag and no config file key.
+4. If the setting also has a flag, add a field to `config.Flags`, apply it with `v.Set` in `load`, and register the flag in `main`. Secrets get no flag, no config file key and no `envBindings` entry: they are read with `os.Getenv`, for the transport that uses them only.
 5. Validate the value in `validate()`, and add an error to `internal/config/error.go` following meshkit's conventions, with the next code from `helpers/component_info.json`.
 6. Add test cases to `config_test.go`.
 7. Add the setting to `config_example.yml`. A test loads that file, so a broken example fails the tests.
