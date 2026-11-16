@@ -7,13 +7,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/meshery-extensions/meshery-mcp-server/internal/config"
 )
 
 const app = "test-app"
 
-// lines splits log output into non-empty lines.
 func lines(buf *bytes.Buffer) []string {
 	var out []string
 	for _, l := range strings.Split(buf.String(), "\n") {
@@ -62,8 +62,11 @@ func TestNew_JSONLinesHaveOneShape(t *testing.T) {
 			t.Errorf("line %d level = %v, want %q", i, entries[i]["level"], want)
 		}
 	}
-	if entries[0]["time"].(string) == "" || len(entries[0]["time"].(string)) != len(entries[1]["time"].(string)) {
-		t.Errorf("time formats differ: %q vs %q", entries[0]["time"], entries[1]["time"])
+	for i, e := range entries {
+		ts, _ := e["time"].(string)
+		if _, err := time.Parse(time.RFC3339, ts); err != nil {
+			t.Errorf("line %d time %q is not RFC 3339: %v", i, ts, err)
+		}
 	}
 }
 
