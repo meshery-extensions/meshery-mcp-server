@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid"
 	relationshipv1alpha3 "github.com/meshery/schemas/models/v1alpha3/relationship"
 	modelv1beta1 "github.com/meshery/schemas/models/v1beta1/model"
 	componentv1beta3 "github.com/meshery/schemas/models/v1beta3/component"
@@ -21,43 +22,43 @@ import (
 	"github.com/meshery-extensions/meshery-mcp-server/internal/tools"
 )
 
-var _ tools.Registry = (*fakeRegistry)(nil)
+var _ tools.Backend = (*fakeBackend)(nil)
 
 // The current revision and the last one with an initialize handshake.
 var protocolVersions = []string{"2026-07-28", "2025-11-25"}
 
-type fakeRegistry struct {
+type fakeBackend struct {
 	gotCreds meshery.Credentials
 	gotOK    bool
 }
 
-func (f *fakeRegistry) record(ctx context.Context) {
+func (f *fakeBackend) record(ctx context.Context) {
 	f.gotCreds, f.gotOK = meshery.CredentialsFromContext(ctx)
 }
 
-func (f *fakeRegistry) SearchComponents(ctx context.Context, _, _, _ string) ([]componentv1beta3.ComponentDefinition, error) {
+func (f *fakeBackend) SearchComponents(ctx context.Context, _, _ string, _ tools.Page) (tools.Result[componentv1beta3.ComponentDefinition], error) {
 	f.record(ctx)
-	return nil, nil
+	return tools.Result[componentv1beta3.ComponentDefinition]{}, nil
 }
 
-func (f *fakeRegistry) GetComponent(ctx context.Context, _ string) (componentv1beta3.ComponentDefinition, error) {
+func (f *fakeBackend) GetComponent(ctx context.Context, _ uuid.UUID) (componentv1beta3.ComponentDefinition, error) {
 	f.record(ctx)
 	return componentv1beta3.ComponentDefinition{}, nil
 }
 
-func (f *fakeRegistry) ListModels(ctx context.Context, _ string, _, _ int) ([]modelv1beta1.ModelDefinition, error) {
+func (f *fakeBackend) ListModels(ctx context.Context, _ string, _ tools.Page) (tools.Result[modelv1beta1.ModelDefinition], error) {
 	f.record(ctx)
-	return nil, nil
+	return tools.Result[modelv1beta1.ModelDefinition]{}, nil
 }
 
-func (f *fakeRegistry) GetModel(ctx context.Context, _ string) (modelv1beta1.ModelDefinition, error) {
+func (f *fakeBackend) GetModel(ctx context.Context, _ uuid.UUID) (modelv1beta1.ModelDefinition, error) {
 	f.record(ctx)
 	return modelv1beta1.ModelDefinition{}, nil
 }
 
-func (f *fakeRegistry) ListRelationships(ctx context.Context, _ string) ([]relationshipv1alpha3.RelationshipDefinition, error) {
+func (f *fakeBackend) ListRelationships(ctx context.Context, _ string, _ tools.Page) (tools.Result[relationshipv1alpha3.RelationshipDefinition], error) {
 	f.record(ctx)
-	return nil, nil
+	return tools.Result[relationshipv1alpha3.RelationshipDefinition]{}, nil
 }
 
 var testCreds = meshery.Credentials{Provider: "Meshery", Token: "abc"}
@@ -104,9 +105,9 @@ func callGetComponent(cs *mcp.ClientSession) (*mcp.CallToolResult, error) {
 	})
 }
 
-func TestNewServer_RequiresRegistry(t *testing.T) {
+func TestNewServer_RequiresBackend(t *testing.T) {
 	if _, err := newServer(Options{Name: "test"}); err == nil {
-		t.Fatal("want error for missing registry, got nil")
+		t.Fatal("want error for missing backend, got nil")
 	}
 }
 
@@ -114,7 +115,7 @@ func TestNewServer_LogsCapabilities(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	server, err := newServer(Options{Name: "test", Registry: &fakeRegistry{}, Logger: logger})
+	server, err := newServer(Options{Name: "test", Backend: &fakeBackend{}, Logger: logger})
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestCapabilities_OnlyTools(t *testing.T) {
 	for _, version := range protocolVersions {
 		t.Run(version, func(t *testing.T) {
 			// From server/discover (2026-07-28) or initialize (2025-11-25).
-			cs, _, _ := start(t, Options{Name: "test", Registry: &fakeRegistry{}}, version)
+			cs, _, _ := start(t, Options{Name: "test", Backend: &fakeBackend{}}, version)
 
 			res := cs.InitializeResult()
 			if res == nil || res.Capabilities == nil {
@@ -198,8 +199,8 @@ func TestCapabilities_OnlyTools(t *testing.T) {
 func TestCredentials(t *testing.T) {
 	for _, version := range protocolVersions {
 		t.Run(version+"/token reaches the registry", func(t *testing.T) {
-			fake := &fakeRegistry{}
-			cs, _, _ := start(t, Options{Name: "test", Registry: fake, Credentials: staticCredentials(testCreds)}, version)
+			fake := &fakeBackend{}
+			cs, _, _ := start(t, Options{Name: "test", Backend: fake, Credentials: staticCredentials(testCreds)}, version)
 
 			res, err := callGetComponent(cs)
 			if err != nil || res.IsError {
@@ -211,8 +212,8 @@ func TestCredentials(t *testing.T) {
 		})
 
 		t.Run(version+"/no credentials means no token", func(t *testing.T) {
-			fake := &fakeRegistry{}
-			cs, _, _ := start(t, Options{Name: "test", Registry: fake}, version)
+			fake := &fakeBackend{}
+			cs, _, _ := start(t, Options{Name: "test", Backend: fake}, version)
 
 			if _, err := callGetComponent(cs); err != nil {
 				t.Fatalf("CallTool: %v", err)
@@ -230,7 +231,7 @@ func TestCredentials(t *testing.T) {
 				}
 				return ctx, nil
 			}
-			cs, _, _ := start(t, Options{Name: "test", Registry: &fakeRegistry{}, Credentials: deny}, version)
+			cs, _, _ := start(t, Options{Name: "test", Backend: &fakeBackend{}, Credentials: deny}, version)
 
 			if _, err := callGetComponent(cs); err == nil {
 				t.Fatal("want a protocol error, got nil")
@@ -242,7 +243,7 @@ func TestCredentials(t *testing.T) {
 func TestRunTransport_CleanShutdown(t *testing.T) {
 	for _, version := range protocolVersions {
 		t.Run(version+"/context cancelled", func(t *testing.T) {
-			_, cancel, done := start(t, Options{Name: "test", Registry: &fakeRegistry{}}, version)
+			_, cancel, done := start(t, Options{Name: "test", Backend: &fakeBackend{}}, version)
 			cancel()
 			if err := wait(t, done); err != nil {
 				t.Errorf("runTransport returned %v, want nil", err)
@@ -250,7 +251,7 @@ func TestRunTransport_CleanShutdown(t *testing.T) {
 		})
 
 		t.Run(version+"/client disconnects", func(t *testing.T) {
-			cs, _, done := start(t, Options{Name: "test", Registry: &fakeRegistry{}}, version)
+			cs, _, done := start(t, Options{Name: "test", Backend: &fakeBackend{}}, version)
 			_ = cs.Close()
 			if err := wait(t, done); err != nil {
 				t.Errorf("runTransport returned %v, want nil", err)

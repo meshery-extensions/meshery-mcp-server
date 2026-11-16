@@ -10,17 +10,14 @@ import (
 	"github.com/meshery-extensions/meshery-mcp-server/internal/tools"
 )
 
-// CredentialsFunc runs before every request and returns the context the
-// request is handled with, carrying the caller's credentials. An error
-// rejects the request.
+// CredentialsFunc runs before every request; an error rejects it.
 type CredentialsFunc func(ctx context.Context, req mcp.Request) (context.Context, error)
 
 type Options struct {
-	Name     string
-	Version  string
-	Logger   *slog.Logger
-	Registry tools.Registry
-	// Credentials is optional; nil means requests carry no credentials.
+	Name        string
+	Version     string
+	Logger      *slog.Logger
+	Backend     tools.Backend
 	Credentials CredentialsFunc
 }
 
@@ -29,22 +26,20 @@ func newServer(opts Options) (*mcp.Server, error) {
 		&mcp.Implementation{Name: opts.Name, Version: opts.Version},
 		&mcp.ServerOptions{
 			Logger: opts.Logger,
-			// Advertise only what is registered. With nil Capabilities the SDK
-			// also advertises logging, which this server does not use and
-			// protocol 2026-07-28 deprecates.
+			// With nil Capabilities the SDK also advertises logging, which
+			// this server does not use and protocol 2026-07-28 deprecates.
 			Capabilities: &mcp.ServerCapabilities{},
 		},
 	)
 	if opts.Credentials != nil {
 		server.AddReceivingMiddleware(credentialsMiddleware(opts.Credentials))
 	}
-	toolNames, err := tools.Register(server, opts.Registry)
+	toolNames, err := tools.Register(server, opts.Backend)
 	if err != nil {
 		return nil, err
 	}
 	if opts.Logger != nil {
-		// Resources and prompts are listed so the line keeps one shape once
-		// they exist; nothing registers them yet.
+		// Nothing registers resources or prompts yet.
 		opts.Logger.Info("registered capabilities",
 			"tools", toolNames,
 			"resources", []string{},

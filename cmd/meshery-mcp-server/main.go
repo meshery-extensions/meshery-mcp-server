@@ -86,10 +86,10 @@ func run(boot logger.Handler) (logger.Handler, error) {
 	}()
 
 	opts := mcpserver.Options{
-		Name:     appName,
-		Version:  version,
-		Logger:   sdkLog,
-		Registry: meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL)),
+		Name:    appName,
+		Version: version,
+		Logger:  sdkLog,
+		Backend: meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL)),
 	}
 
 	switch cfg.Transport.Mode {

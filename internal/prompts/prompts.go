@@ -1,4 +1,4 @@
-// Package prompts implements the MCP prompts the server exposes: reusable prompt templates users can pick.
+// Package prompts implements the MCP prompts the server exposes.
 package prompts
 
 type Prompts struct{}

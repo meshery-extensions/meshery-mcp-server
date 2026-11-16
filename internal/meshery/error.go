@@ -10,9 +10,6 @@ const (
 	ErrNotImplementedCode = "meshery-mcp-server-1009"
 )
 
-// ErrNotImplemented is returned by every Registry method until its Meshery
-// API call exists. Tools wrap it, so the AI sees a tool error naming the
-// operation instead of data that looks real.
 func ErrNotImplemented(operation string) error {
 	return errors.New(ErrNotImplementedCode, errors.Alert,
 		[]string{"Not implemented"},

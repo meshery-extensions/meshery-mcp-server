@@ -48,8 +48,8 @@ func connectHTTP(t *testing.T, endpoint, protocolVersion string) *mcp.ClientSess
 func TestHTTP_ServesToolsWithCredentials(t *testing.T) {
 	for _, version := range protocolVersions {
 		t.Run(version, func(t *testing.T) {
-			fake := &fakeRegistry{}
-			endpoint, _, _ := startHTTP(t, Options{Name: "test", Registry: fake, Credentials: staticCredentials(testCreds)})
+			fake := &fakeBackend{}
+			endpoint, _, _ := startHTTP(t, Options{Name: "test", Backend: fake, Credentials: staticCredentials(testCreds)})
 			cs := connectHTTP(t, endpoint, version)
 
 			tools, err := cs.ListTools(context.Background(), nil)
@@ -72,7 +72,7 @@ func TestHTTP_ServesToolsWithCredentials(t *testing.T) {
 }
 
 func TestHTTP_RejectsBrowserRequests(t *testing.T) {
-	endpoint, _, _ := startHTTP(t, Options{Name: "test", Registry: &fakeRegistry{}})
+	endpoint, _, _ := startHTTP(t, Options{Name: "test", Backend: &fakeBackend{}})
 
 	tests := []struct {
 		name       string
@@ -133,7 +133,7 @@ func postJSON(t *testing.T, endpoint, body string, extra http.Header) (int, http
 }
 
 func TestHTTP_Stateless(t *testing.T) {
-	endpoint, _, _ := startHTTP(t, Options{Name: "test", Registry: &fakeRegistry{}})
+	endpoint, _, _ := startHTTP(t, Options{Name: "test", Backend: &fakeBackend{}})
 
 	t.Run("GET is not allowed", func(t *testing.T) {
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
@@ -185,7 +185,7 @@ func TestHTTP_Stateless(t *testing.T) {
 }
 
 func TestHTTP_CleanShutdown(t *testing.T) {
-	endpoint, cancel, done := startHTTP(t, Options{Name: "test", Registry: &fakeRegistry{}})
+	endpoint, cancel, done := startHTTP(t, Options{Name: "test", Backend: &fakeBackend{}})
 	connectHTTP(t, endpoint, protocolVersions[0])
 
 	cancel()
@@ -202,7 +202,7 @@ func TestRunHTTP_PortInUse(t *testing.T) {
 	}
 	defer func() { _ = ln.Close() }()
 
-	err = RunHTTP(context.Background(), Options{Name: "test", Registry: &fakeRegistry{}},
+	err = RunHTTP(context.Background(), Options{Name: "test", Backend: &fakeBackend{}},
 		HTTPOptions{Addr: ln.Addr().String()})
 	if err == nil {
 		t.Fatal("want error when the port is in use, got nil")

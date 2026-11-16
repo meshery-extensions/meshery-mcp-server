@@ -1,31 +1,32 @@
-// Package tools implements the MCP tools the server exposes: actions the AI can invoke.
+// Package tools implements the MCP tools the server exposes.
 //
-// Two kinds of types meet here. Meshery's types (from github.com/meshery/schemas)
-// are what the registry interfaces return. Each tool's In and Out types are
-// what the AI sends and sees; they are part of the tool's contract and carry
-// only the fields the AI needs. Handlers map the first to the second.
-//
-// "Model" in this package always means a Meshery model, never the AI model.
+// Backend methods return Meshery's schema types; each tool's In and Out types
+// are its contract with the AI and carry only what the AI needs. "Model"
+// always means a Meshery model, never the AI model.
 package tools
 
 import (
+	"errors"
+	"strings"
+
+	"github.com/gofrs/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Registry is everything the tools need from Meshery. Each domain declares
-// its own narrow interface; an implementation satisfies all of them.
-//
-// Implementations should return MeshKit errors that say what failed: tools
-// pass those to the AI unchanged, and wrap any other error.
+// Backend is everything the tools need from Meshery, one interface per
+// domain. Get methods return an error wrapping ErrNotFound for an unknown ID.
+type Backend interface {
+	Registry
+}
+
+// Registry covers Meshery's capabilities registry (/api/registry).
 type Registry interface {
 	ComponentRegistry
 	ModelRegistry
 	RelationshipRegistry
 }
 
-// notImplementedNote is appended to the description of every tool whose
-// Meshery calls do not exist yet, so the AI knows not to rely on it.
-// Remove it from a tool when that tool is implemented.
+// Appended to a tool's description until its Meshery call exists.
 const notImplementedNote = "Not implemented yet: always returns an error."
 
 type toolset struct {
@@ -33,15 +34,12 @@ type toolset struct {
 	tools []toolEntry
 }
 
-// toolEntry pairs a tool's metadata with the call that adds it to a server.
-// The add func hides the handler's In and Out type parameters, so tools with
-// different types fit in one slice.
+// add hides the handler's type parameters, so different tools fit in one slice.
 type toolEntry struct {
 	tool *mcp.Tool
 	add  func(*mcp.Server)
 }
 
-// newToolEntry returns the toolEntry for tool t handled by h.
 func newToolEntry[In, Out any](t *mcp.Tool, h mcp.ToolHandlerFor[In, Out]) toolEntry {
 	return toolEntry{
 		tool: t,
@@ -49,19 +47,18 @@ func newToolEntry[In, Out any](t *mcp.Tool, h mcp.ToolHandlerFor[In, Out]) toolE
 	}
 }
 
-// Register adds every tool to s and returns their names, in registration
-// order. The SDK has no way to list a server's tools, so this is how the
-// server learns what it registered.
-func Register(s *mcp.Server, r Registry) ([]string, error) {
+// Register adds every tool to s and returns their names; the SDK offers no
+// way to list them afterwards.
+func Register(s *mcp.Server, b Backend) ([]string, error) {
 	if s == nil {
 		return nil, ErrServerRequired()
 	}
-	if r == nil {
-		return nil, ErrRegistryRequired()
+	if b == nil {
+		return nil, ErrBackendRequired()
 	}
 
 	var names []string
-	for _, ts := range toolsets(r) {
+	for _, ts := range toolsets(b) {
 		for _, entry := range ts.tools {
 			entry.add(s)
 			names = append(names, entry.tool.Name)
@@ -70,14 +67,31 @@ func Register(s *mcp.Server, r Registry) ([]string, error) {
 	return names, nil
 }
 
-func toolsets(r Registry) []toolset {
+func toolsets(b Backend) []toolset {
 	return []toolset{
-		componentToolset(r),
-		modelToolset(r),
-		relationshipToolset(r),
+		componentToolset(b),
+		modelToolset(b),
+		relationshipToolset(b),
 	}
 }
 
 func readOnly() *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{ReadOnlyHint: true}
+}
+
+var ErrNotFound = errors.New("not found")
+
+// parseID validates an ID argument. Meshery compares IDs as strings against
+// their canonical form, so a malformed or differently written ID would
+// silently match nothing; uuid.UUID.String gives the canonical form.
+func parseID(argument, value string) (uuid.UUID, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return uuid.Nil, ErrRequiredArgument(argument)
+	}
+	id, err := uuid.FromString(value)
+	if err != nil || id == uuid.Nil {
+		return uuid.Nil, ErrInvalidID(argument, value)
+	}
+	return id, nil
 }

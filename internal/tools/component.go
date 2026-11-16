@@ -2,17 +2,19 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"strings"
 
+	"github.com/gofrs/uuid"
 	componentv1beta3 "github.com/meshery/schemas/models/v1beta3/component"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ComponentRegistry is what the component tools need from Meshery.
 type ComponentRegistry interface {
-	// SearchComponents returns components whose name matches query. kind and
-	// model narrow the results; an empty string means no filter.
-	SearchComponents(ctx context.Context, query, kind, model string) ([]componentv1beta3.ComponentDefinition, error)
-	GetComponent(ctx context.Context, id string) (componentv1beta3.ComponentDefinition, error)
+	// An empty query or model does not filter. Results may omit schemas.
+	SearchComponents(ctx context.Context, query, model string, p Page) (Result[componentv1beta3.ComponentDefinition], error)
+	GetComponent(ctx context.Context, id uuid.UUID) (componentv1beta3.ComponentDefinition, error)
 }
 
 type componentHandler struct {
@@ -30,7 +32,6 @@ func componentToolset(r ComponentRegistry) toolset {
 	}
 }
 
-// ComponentSummary is the part of a component definition the AI sees.
 type ComponentSummary struct {
 	ID           string `json:"id" jsonschema:"ID of the component; pass it to get_component"`
 	Kind         string `json:"kind" jsonschema:"kind of the component, for example Pod"`
@@ -52,35 +53,40 @@ func componentSummary(c componentv1beta3.ComponentDefinition) ComponentSummary {
 }
 
 var searchComponentsTool = &mcp.Tool{
-	Name:        "search_components",
-	Title:       "Search components",
-	Description: "Search components across all Meshery models. " + notImplementedNote,
+	Name:  "search_components",
+	Title: "Search components",
+	Description: "Search components by display name, across all Meshery models or within one. " +
+		"Results leave out each component's schema; get it with get_component. " + notImplementedNote,
 	Annotations: readOnly(),
 }
 
 type SearchComponentsIn struct {
-	Query string `json:"query" jsonschema:"text to match against component names"`
-	Kind  string `json:"kind,omitempty" jsonschema:"only return components of this kind, for example Deployment"`
-	Model string `json:"model,omitempty" jsonschema:"only return components of the Meshery model with this name, for example kubernetes"`
+	Query string `json:"query,omitempty" jsonschema:"text to match against component display names, for example Deployment; set query, model or both"`
+	Model string `json:"model,omitempty" jsonschema:"only return components of the Meshery model with this name, for example kubernetes; set query, model or both"`
+	PageIn
 }
 
 type SearchComponentsOut struct {
-	Components []ComponentSummary `json:"components" jsonschema:"matching components"`
+	Components []ComponentSummary `json:"components" jsonschema:"matching components on this page"`
+	PageOut
 }
 
 func (h *componentHandler) searchComponents(ctx context.Context, _ *mcp.CallToolRequest, in SearchComponentsIn) (*mcp.CallToolResult, SearchComponentsOut, error) {
-	if in.Query == "" {
-		return nil, SearchComponentsOut{}, ErrRequiredArgument("query")
+	if in.Query == "" && in.Model == "" {
+		return nil, SearchComponentsOut{}, ErrRequiredOneOf("query", "model")
 	}
-	components, err := h.registry.SearchComponents(ctx, in.Query, in.Kind, in.Model)
+	p, err := in.resolve()
 	if err != nil {
-		return nil, SearchComponentsOut{}, fromRegistry(err, ErrSearchComponents)
+		return nil, SearchComponentsOut{}, err
 	}
-	out := SearchComponentsOut{Components: make([]ComponentSummary, 0, len(components))}
-	for _, c := range components {
-		out.Components = append(out.Components, componentSummary(c))
+	res, err := h.registry.SearchComponents(ctx, in.Query, in.Model, p)
+	if err != nil {
+		return nil, SearchComponentsOut{}, fromBackend(err, ErrSearchComponents)
 	}
-	return nil, out, nil
+	return nil, SearchComponentsOut{
+		Components: mapItems(res.Items, componentSummary),
+		PageOut:    p.out(res.Total),
+	}, nil
 }
 
 var getComponentTool = &mcp.Tool{
@@ -97,20 +103,42 @@ type GetComponentIn struct {
 type GetComponentOut struct {
 	Component   ComponentSummary `json:"component" jsonschema:"the component"`
 	Description string           `json:"description" jsonschema:"what the component is for"`
-	Schema      string           `json:"schema" jsonschema:"JSON Schema of the component's configuration"`
+	// An object, not Meshery's JSON text, which would reach the AI escaped.
+	// json.RawMessage is not used: the SDK infers it as an array of bytes.
+	Schema map[string]any `json:"schema,omitempty" jsonschema:"JSON Schema of the component's configuration; absent if the component has none"`
 }
 
 func (h *componentHandler) getComponent(ctx context.Context, _ *mcp.CallToolRequest, in GetComponentIn) (*mcp.CallToolResult, GetComponentOut, error) {
-	if in.ID == "" {
-		return nil, GetComponentOut{}, ErrRequiredArgument("id")
-	}
-	c, err := h.registry.GetComponent(ctx, in.ID)
+	id, err := parseID("id", in.ID)
 	if err != nil {
-		return nil, GetComponentOut{}, fromRegistry(err, func(err error) error { return ErrGetComponent(err, in.ID) })
+		return nil, GetComponentOut{}, err
+	}
+	c, err := h.registry.GetComponent(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return nil, GetComponentOut{}, ErrComponentNotFound(id.String())
+	}
+	if err != nil {
+		return nil, GetComponentOut{}, fromBackend(err, func(err error) error { return ErrGetComponent(err, id.String()) })
+	}
+	schema, err := decodeSchema(c.Component.Schema)
+	if err != nil {
+		return nil, GetComponentOut{}, ErrInvalidComponentSchema(err, id.String())
 	}
 	return nil, GetComponentOut{
 		Component:   componentSummary(c),
 		Description: c.Description,
-		Schema:      c.Component.Schema,
+		Schema:      schema,
 	}, nil
+}
+
+// Annotation components have an empty schema, which decodes to nil.
+func decodeSchema(text string) (map[string]any, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(text), &schema); err != nil {
+		return nil, err
+	}
+	return schema, nil
 }
