@@ -8,9 +8,9 @@
 #   built-in defaults  <  this file  <  environment variables  <  flags
 # Only the transport settings have flags.
 #
-# Secrets are never read from this file: set MESHERY_API_TOKEN and
-# MESHERY_MCP_ACCESS_KEY in the environment. A secret in this file stops the
-# server at startup.
+# The Meshery token is never read from this file: set MESHERY_API_TOKEN in
+# the environment (stdio only). A token in this file stops the server at
+# startup.
 
 meshery:
   # Meshery server to talk to.            Env: MESHERY_SERVER_URL
@@ -21,17 +21,29 @@ meshery:
 transport:
   # How MCP clients reach the server.     Flag: --transport  Env: MESHERY_MCP_TRANSPORT
   #   stdio  the AI app starts the server and talks over stdin/stdout
-  #   http   Streamable HTTP at http://<host>:<port>/mcp
+  #   http   Streamable HTTP at http://<host>:<port>/mcp, each client
+  #          authorizing through MCP authorization (OAuth).
   mode: stdio
 
-  # http only. Must be a loopback address (127.0.0.1, ::1, localhost):
-  # remote access needs OAuth, which is not implemented yet. Clients must
-  # also send "Authorization: Bearer <key>", where the key is
-  # MESHERY_MCP_ACCESS_KEY (env only, at least 32 characters).
-  #                                       Flag: --host  Env: MESHERY_MCP_HOST
-  host: 127.0.0.1
-  #                                       Flag: --port  Env: MESHERY_MCP_PORT
-  port: 8080
+  # Settings for the stdio transport, ignored for http. stdio calls Meshery
+  # as the user whose token is in MESHERY_API_TOKEN (env only). Without a
+  # token, requests carry none, which only Meshery's Local provider accepts.
+  stdio:
+    # Meshery provider the token belongs to, as Meshery names it.
+    # Defaults to Local without a token and to Meshery (cloud.meshery.io)
+    # with one. A token with Local stops the server at startup: Local
+    # ignores tokens.                     Env: MESHERY_PROVIDER
+    # provider: Meshery
+
+  # Settings for the http transport, ignored for stdio. Over http, each
+  # client obtains its Meshery identity through OAuth; setting
+  # MESHERY_API_TOKEN stops the server at startup.
+  http:
+    # Must be a loopback address (127.0.0.1, ::1, localhost).
+    #                                     Flag: --host  Env: MESHERY_MCP_HOST
+    host: 127.0.0.1
+    #                                     Flag: --port  Env: MESHERY_MCP_PORT
+    port: 8080
 
 log:
   # One of: debug, info, warn, error.     Env: LOG_LEVEL

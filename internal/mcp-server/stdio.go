@@ -7,8 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// RunStdio serves one client over stdin/stdout until the client closes stdin
-// or ctx is cancelled. Both are a clean shutdown and return nil.
+// RunStdio returns nil when the client closes stdin or ctx is cancelled.
 func RunStdio(ctx context.Context, opts Options) error {
 	return runTransport(ctx, opts, &mcp.StdioTransport{})
 }
