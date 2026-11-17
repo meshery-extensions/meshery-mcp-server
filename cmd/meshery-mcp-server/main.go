@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -50,16 +51,31 @@ func run(log logger.Handler) error {
 	log.Infof("starting %s version=%s commit=%s meshery_url=%s token_configured=%t",
 		appName, version, commitsha, cfg.Meshery.URL, cfg.Meshery.Token != "")
 
-	client := meshery.NewClient(
-		cfg.Meshery.URL,
-		string(cfg.Meshery.Token),
-		meshery.WithKeychainScope(cfg.Meshery.KeychainScope),
-		meshery.WithMaxConcurrentCalls(cfg.Meshery.MaxConcurrentCalls),
-		meshery.WithMaxRetries(cfg.Meshery.MaxRetries),
-		meshery.WithLogger(log),
-	)
-	log.Infof("meshery cloud client ready: keychain_scope=%q max_concurrent_calls=%d max_retries=%d",
-		cfg.Meshery.KeychainScope, cfg.Meshery.MaxConcurrentCalls, cfg.Meshery.MaxRetries)
+	client, err := meshery.New(meshery.Config{
+		BaseURL:            cfg.Meshery.URL,
+		Token:              string(cfg.Meshery.Token),
+		Timeout:            cfg.Meshery.Timeout,
+		MaxRetries:         cfg.Meshery.MaxRetries,
+		MaxConcurrentCalls: cfg.Meshery.MaxConcurrentCalls,
+		KeychainScope:      cfg.Meshery.KeychainScope,
+		AuthMode:           meshery.AuthCookie,
+	})
+	if err != nil {
+		return err
+	}
+	log.Infof("meshery client ready: url=%s token_configured=%t keychain_scope=%q max_concurrent_calls=%d max_retries=%d timeout=%s",
+		cfg.Meshery.URL, cfg.Meshery.Token != "", cfg.Meshery.KeychainScope,
+		cfg.Meshery.MaxConcurrentCalls, cfg.Meshery.MaxRetries, cfg.Meshery.Timeout)
+
+	// A health check is advisory: the MCP server can still start so tools can
+	// report the failure themselves.
+	pingCtx, cancel := context.WithTimeout(context.Background(), cfg.Meshery.Timeout)
+	defer cancel()
+	if version, err := client.Ping(pingCtx); err != nil {
+		log.Warnf("meshery health check failed: %v", err)
+	} else {
+		log.Infof("meshery reachable: build=%q commitsha=%q", version.Build, version.Commitsha)
+	}
 
 	// TODO: create MCP server; serve over stdio using `client`.
 	_ = client

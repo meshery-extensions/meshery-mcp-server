@@ -17,6 +17,10 @@ import (
 // requested keychains. The header name is pending Cloud's contract.
 const HeaderKeychainScope = "Meshery-Keychain-Scope"
 
+// HeaderAPIToken is the cookie Meshery Server reads for API token
+// authentication. Cloud uses Authorization: Bearer instead.
+const HeaderAPIToken = "token"
+
 type callerIDKey struct{}
 
 // WithCallerID returns a context carrying the authenticated user id that
@@ -61,6 +65,40 @@ func WithLogger(log logger.Handler) Option {
 	return func(c *Client) { c.log = log }
 }
 
+// WithAuthHeader configures the Authorization header name and value format.
+// Use "Authorization" (default) for Bearer token auth (Cloud API), or
+// "token" for Meshery Server API key header auth (no "Bearer " prefix).
+func WithAuthHeader(header string) Option {
+	return func(c *Client) {
+		c.authHeader = header
+		if header == HeaderAPIToken {
+			c.authValue = func(token string) string { return token }
+		} else {
+			c.authValue = func(token string) string { return "Bearer " + token }
+		}
+	}
+}
+
+// WithAuthMode selects cookie auth (Meshery Server) or bearer auth (Cloud).
+func WithAuthMode(mode AuthMode) Option {
+	return func(c *Client) { c.authMode = mode }
+}
+
+// WithProvider sets the optional meshery-provider value sent with cookie auth.
+func WithProvider(provider string) Option {
+	return func(c *Client) { c.provider = provider }
+}
+
+// WithUserAgent overrides the User-Agent sent with every request.
+func WithUserAgent(ua string) Option {
+	return func(c *Client) { c.userAgent = ua }
+}
+
+// WithTimeout overrides the overall request timeout.
+func WithTimeout(timeout time.Duration) Option {
+	return func(c *Client) { c.http.Timeout = timeout }
+}
+
 // Client calls the Meshery Cloud API with token handling, rate-limit and
 // revocation behavior per issues #6333, #6366, #6369 and #6381.
 type Client struct {
@@ -73,6 +111,11 @@ type Client struct {
 	maxRetries    int
 	backoff       Backoff
 	log           logger.Handler
+	authHeader    string                    // Header name for token auth; defaults to "Authorization" with Bearer prefix
+	authValue     func(token string) string // Formats the header value; defaults to "Bearer <token>"
+	authMode      AuthMode
+	provider      string
+	userAgent     string
 }
 
 // NewClient builds a Cloud client for baseURL using token. The token is
@@ -80,12 +123,16 @@ type Client struct {
 func NewClient(baseURL string, token string, opts ...Option) *Client {
 	c := &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		http:       &http.Client{Timeout: 30 * time.Second},
+		http:       newHTTPClient(30 * time.Second),
 		tokens:     &MemoryStore{},
 		limiter:    NewLimiter(),
 		semaphore:  NewSemaphore(4),
 		maxRetries: 3,
 		backoff:    Backoff{Base: DefaultBaseBackoff, Cap: DefaultCapBackoff},
+		authHeader: "Authorization",
+		authValue:  func(token string) string { return "Bearer " + token },
+		authMode:   AuthBearer,
+		userAgent:  defaultUserAgent,
 	}
 	c.tokens.Set(token)
 	for _, o := range opts {
@@ -104,11 +151,40 @@ func (c *Client) Token() (string, bool) {
 	return c.tokens.Get()
 }
 
+// applyAuth injects the credentials the target service actually accepts.
+// Meshery Server reads the token cookie; Meshery Cloud reads Authorization:
+// Bearer. An empty token sends no credentials.
+func (c *Client) applyAuth(req *http.Request, token string) {
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if token == "" {
+		return
+	}
+	if c.authMode == AuthCookie {
+		//nolint:gosec // G124: Secure/HttpOnly/SameSite are response attributes only.
+		req.AddCookie(&http.Cookie{Name: HeaderAPIToken, Value: token})
+		if c.provider != "" {
+			//nolint:gosec // G124: Secure/HttpOnly/SameSite are response attributes only.
+			req.AddCookie(&http.Cookie{Name: "meshery-provider", Value: c.provider})
+		}
+		return
+	}
+	req.Header.Set(c.authHeader, c.authValue(token))
+}
+
 // Call performs one Cloud request for tool. It applies the per-tool
 // concurrency bound, the per-(family, caller) rate budget, classifies the
 // response, and retries 429/503 a bounded number of times with context
 // awareness and jitter. 401 and 403 are returned immediately, never retried.
 func (c *Client) Call(ctx context.Context, method, path string, body []byte, tool string) ([]byte, error) {
+	return c.call(ctx, method, path, body, tool, true)
+}
+
+// call is the single HTTP path for every request. Call requires a token;
+// read-only wrappers and Ping may call without one because a Meshery Server
+// in local provider mode has no authentication.
+func (c *Client) call(ctx context.Context, method, path string, body []byte, tool string, requireToken bool) ([]byte, error) {
 	family := FamilyForRoute(method, path)
 
 	if err := c.semaphore.Acquire(ctx, tool); err != nil {
@@ -121,7 +197,7 @@ func (c *Client) Call(ctx context.Context, method, path string, body []byte, too
 	}
 
 	token, ok := c.tokens.Get()
-	if !ok {
+	if requireToken && !ok {
 		return nil, ErrNoToken()
 	}
 
@@ -133,7 +209,7 @@ func (c *Client) Call(ctx context.Context, method, path string, body []byte, too
 		if err != nil {
 			return nil, fmt.Errorf("building Cloud request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
+		c.applyAuth(req, token)
 		if c.keychainScope != "" {
 			req.Header.Set(HeaderKeychainScope, c.keychainScope)
 		}
@@ -190,8 +266,7 @@ func (c *Client) Call(ctx context.Context, method, path string, body []byte, too
 			}
 			continue
 		default:
-			return nil, fmt.Errorf("cloud request failed: HTTP %d %s", resp.StatusCode,
-				strings.TrimSpace(string(responseBody)))
+			return nil, c.apiError(method, path, resp.StatusCode, responseBody)
 		}
 	}
 	return nil, fmt.Errorf("cloud request failed: HTTP %d", lastStatus)
@@ -235,7 +310,7 @@ func (c *Client) Revoke(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("building revocation request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	c.applyAuth(req, token)
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		resp, err := c.http.Do(req)
