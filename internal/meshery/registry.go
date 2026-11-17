@@ -94,3 +94,19 @@ func (c *Client) ListComponents(ctx context.Context, opts RegistryListOptions) (
 	page.Entries = raw.Components
 	return page, err
 }
+
+// Registry implements tools.Registry on top of a Meshery client. Each embedded
+// type owns one domain's endpoints and response mapping.
+type Registry struct {
+	*Components
+	*Models
+	*Relationships
+}
+
+func NewRegistry(c *Client) *Registry {
+	return &Registry{
+		Components:    &Components{client: c},
+		Models:        &Models{client: c},
+		Relationships: &Relationships{client: c},
+	}
+}
