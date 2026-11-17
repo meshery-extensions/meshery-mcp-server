@@ -11,6 +11,7 @@ meshery-mcp-server reads its configuration once, at startup. To change a setting
 | Keychain scope | `MESHERY_KEYCHAIN_SCOPE` | `meshery.keychain_scope` | *(none)* | Comma-separated keychain ids/names; empty = unscoped token (previous behavior) |
 | Max concurrent Cloud calls per tool | `MESHERY_MAX_CONCURRENT_CALLS` | `meshery.max_concurrent_calls` | `4` | Integer >= 1 |
 | Max Cloud retries per call | `MESHERY_MAX_RETRIES` | `meshery.max_retries` | `3` | Integer >= 0 |
+| HTTP request timeout | `MESHERY_TIMEOUT` | `meshery.timeout` | `30s` | Positive Go duration, e.g. `10s`, `1m` |
 | Log level | `LOG_LEVEL` | `log.level` | `info` | `debug`, `info`, `warn`, `error` (case-insensitive) |
 
 The **Meshery server URL** is the address of the Meshery server this MCP server sends requests to. It is not an address this server listens on: over stdio, the server has no network address of its own.
@@ -67,6 +68,15 @@ The token is a credential. The server never prints it: it is redacted as `[REDAC
 - **With Docker**, pass it as `-e MESHERY_API_TOKEN` with no `=value`. Docker then copies the value from its own environment, so the token never appears in the command line or in process listings.
 - **Never bake it into an image** with `ENV` or `--build-arg`. Build arguments are recorded in the image and readable with `docker history`.
 
+## How the token is sent
+
+Meshery Server and Meshery Cloud authenticate differently, and the client sends only what the target accepts:
+
+- **Meshery Server** (the default `MESHERY_SERVER_URL`) reads a cookie named `token`, not an `Authorization` header and not a `token` request header. The client sends `Cookie: token=<MESHERY_API_TOKEN>` and, when configured, `meshery-provider=<name>`. This comes from the server's `RemoteProvider.GetToken` (`server/models/remote_auth.go`). A local provider deployment needs no token.
+- **Meshery Cloud** reads `Authorization: Bearer <token>`. The existing `Call` and `Revoke` methods keep that behavior; pass `meshery.AuthBearer` when constructing a client for Cloud.
+
+`GET /api/system/version` is unauthenticated, so the startup health check never sends credentials. Tokens are redacted from errors and logs, and credentials are dropped when a redirect crosses hosts.
+
 ## Cloud API-token behavior
 
 When `MESHERY_SERVER_URL` points at Meshery Cloud, the client behaves as follows:
@@ -113,6 +123,8 @@ on revoke.
 | 403 | Insufficient keychain scope | Grant the missing scope named in the error, or set `MESHERY_KEYCHAIN_SCOPE` to the narrowest scope the deployment needs; do not re-auth |
 | 429 | Rate limited | Wait for `Retry-After` (or the backoff) and retry; reduce `meshery.max_concurrent_calls` if batches keep hitting it |
 | 503 | Cloud service unavailable | Retry later; no credential changes are made |
+| Unreachable server | Connection refused, DNS failure or timeout | Check `MESHERY_SERVER_URL` and `MESHERY_TIMEOUT`; the error names the URL |
+| Invalid request timeout | `MESHERY_TIMEOUT` / `meshery.timeout` is zero or negative | Set a positive duration such as `30s` |
 
 ## Usage
 

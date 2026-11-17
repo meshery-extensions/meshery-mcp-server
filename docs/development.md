@@ -49,6 +49,16 @@ Inside a container, `localhost` refers to the container itself, so
 `make docker-run` points the server at `http://host.docker.internal:9081` by
 default. Override it with `DOCKER_MESHERY_SERVER_URL`.
 
+## Client architecture
+
+`internal/meshery` holds one HTTP client. `New(cfg)` validates the URL, timeout and limits, then builds a single `*http.Client` with dial, TLS and response-header timeouts. `Client.call` is the only HTTP path: it applies the per-tool semaphore, per-route rate budget, credentials and user agent, then classifies 401/403/429/503 with the existing status-code contract. `Call` requires a token; read-only wrappers and `Ping` do not, because a local Meshery Server needs none.
+
+`Ping` calls the unauthenticated `GET /api/system/version` and returns a typed `VersionInfo`. Transport failures become a `ConnectError` that names the URL without credentials. Other non-2xx responses become an `APIError` with status, method, path (without query), the server's message and a category sentinel for `errors.Is` (`ErrNotFound`, `ErrConflict`, `ErrValidation`, `ErrServer`).
+
+The domain wrappers (`environments.go`, `workspaces.go`, `designs.go`, `connections.go`, `registry.go`, `performance.go`) are thin read-only methods over `call`. They use Meshery Server routes and return typed page envelopes. GraphQL is deferred: none of these domains needs it today.
+
+To add a wrapper: define the typed model from `meshery/schemas`, add a method that builds the route and query in a new file, call `c.getJSON(ctx, path, query, toolName, &out)`, and add `httptest` cases for success, empty results, malformed JSON and each relevant status. Never expose a token in an error or log line.
+
 ## CI overview
 
 Every pull request runs three CI jobs (`.github/workflows/build-and-test.yml`):
