@@ -29,6 +29,10 @@ meshery:
   # Bound 429/503 retries per Cloud call.               Env: MESHERY_MAX_RETRIES
   max_retries: 3
 
+  # Overall timeout for each HTTP request.              Env: MESHERY_TIMEOUT
+  # Accepts Go duration strings: 30s, 1m, 500ms.
+  timeout: 30s
+
 log:
   # One of: debug, info, warn, error.     Env: LOG_LEVEL
   level: info

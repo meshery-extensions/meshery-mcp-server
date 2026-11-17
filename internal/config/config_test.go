@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/meshery/meshkit/errors"
 )
@@ -31,6 +32,7 @@ func TestLoad(t *testing.T) {
 		envKeychainScope  string
 		envMaxConcurrent  string
 		envMaxRetries     string
+		envTimeout        string
 		fileYAML          string // "" = no config file
 		path              string // explicit path; overrides fileYAML
 		wantURL           string
@@ -39,6 +41,7 @@ func TestLoad(t *testing.T) {
 		wantKeychainScope string
 		wantMaxConcurrent int
 		wantMaxRetries    int
+		wantTimeout       time.Duration
 		wantErr           string // expected short description; "" = expect success
 	}{
 		{name: "defaults only", wantURL: defaultMesheryURL, wantLevel: LogLevelInfo,
@@ -62,6 +65,9 @@ func TestLoad(t *testing.T) {
 			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo, wantMaxConcurrent: 8, wantMaxRetries: defaultMaxRetries},
 		{name: "max retries from env", envMaxRetries: "7",
 			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo, wantMaxRetries: 7, wantMaxConcurrent: defaultMaxConcurrentCalls},
+		{name: "timeout from env", envTimeout: "12s",
+			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo, wantMaxConcurrent: defaultMaxConcurrentCalls,
+			wantMaxRetries: defaultMaxRetries, wantTimeout: 12 * time.Second},
 		{name: "repo config_example.yml loads", path: filepath.Join("..", "..", "config_example.yml"),
 			wantURL: defaultMesheryURL, wantLevel: LogLevelInfo,
 			wantMaxConcurrent: defaultMaxConcurrentCalls, wantMaxRetries: defaultMaxRetries},
@@ -71,6 +77,8 @@ func TestLoad(t *testing.T) {
 		{name: "invalid log level", envLevel: "verbose", wantErr: "Invalid log level"},
 		{name: "max concurrent calls below 1", envMaxConcurrent: "0", wantErr: "Invalid max concurrent calls"},
 		{name: "max retries negative", envMaxRetries: "-1", wantErr: "Invalid max retries"},
+		{name: "timeout zero", envTimeout: "0s", wantErr: "Invalid request timeout"},
+		{name: "timeout negative", envTimeout: "-1s", wantErr: "Invalid request timeout"},
 		{name: "missing file", path: filepath.Join(t.TempDir(), "nope.yaml"), wantErr: "Unable to read the config file"},
 	}
 
@@ -82,6 +90,7 @@ func TestLoad(t *testing.T) {
 			t.Setenv(envMesheryKeychainScope, tt.envKeychainScope)
 			t.Setenv(envMesheryMaxConcurrentCalls, tt.envMaxConcurrent)
 			t.Setenv(envMesheryMaxRetries, tt.envMaxRetries)
+			t.Setenv(envMesheryTimeout, tt.envTimeout)
 			t.Setenv(envLogLevel, tt.envLevel)
 
 			path := tt.path
@@ -116,6 +125,13 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.Meshery.MaxRetries != tt.wantMaxRetries {
 				t.Errorf("MaxRetries = %d, want %d", cfg.Meshery.MaxRetries, tt.wantMaxRetries)
+			}
+			wantTimeout := tt.wantTimeout
+			if wantTimeout == 0 {
+				wantTimeout = defaultTimeout
+			}
+			if cfg.Meshery.Timeout != wantTimeout {
+				t.Errorf("Timeout = %v, want %v", cfg.Meshery.Timeout, wantTimeout)
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/meshery/meshkit/errors"
 )
@@ -13,6 +14,7 @@ const (
 	ErrInvalidLogLevelCode           = "replace_me"
 	ErrInvalidMaxConcurrentCallsCode = "replace_me"
 	ErrInvalidMaxRetriesCode         = "replace_me"
+	ErrInvalidTimeoutCode            = "replace_me"
 )
 
 // ErrReadConfigFile is returned when the --config file cannot be read or parsed.
@@ -70,4 +72,14 @@ func ErrInvalidMaxRetries(value int) error {
 		[]string{fmt.Sprintf("max_retries is %d, must not be negative", value)},
 		[]string{"MESHERY_MAX_RETRIES / meshery.max_retries is negative"},
 		[]string{"Set it to an integer >= 0"})
+}
+
+// ErrInvalidTimeout is returned when meshery.timeout / MESHERY_TIMEOUT is
+// zero or negative.
+func ErrInvalidTimeout(value time.Duration) error {
+	return errors.New(ErrInvalidTimeoutCode, errors.Alert,
+		[]string{"Invalid request timeout"},
+		[]string{fmt.Sprintf("timeout is %v, must be greater than zero", value)},
+		[]string{"MESHERY_TIMEOUT / meshery.timeout is zero or negative"},
+		[]string{"Set it to a positive duration such as 30s or 1m"})
 }

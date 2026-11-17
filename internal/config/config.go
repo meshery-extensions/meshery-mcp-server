@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -18,6 +19,7 @@ const (
 	keyMesheryKeychainScope      = "meshery.keychain_scope"
 	keyMesheryMaxConcurrentCalls = "meshery.max_concurrent_calls"
 	keyMesheryMaxRetries         = "meshery.max_retries"
+	keyMesheryTimeout            = "meshery.timeout"
 	keyLogLevel                  = "log.level"
 
 	envMesheryURL   = "MESHERY_SERVER_URL"
@@ -26,11 +28,13 @@ const (
 	envMesheryKeychainScope      = "MESHERY_KEYCHAIN_SCOPE"
 	envMesheryMaxConcurrentCalls = "MESHERY_MAX_CONCURRENT_CALLS"
 	envMesheryMaxRetries         = "MESHERY_MAX_RETRIES"
+	envMesheryTimeout            = "MESHERY_TIMEOUT"
 	envLogLevel                  = "LOG_LEVEL"
 
 	defaultMesheryURL         = "http://localhost:9081"
 	defaultMaxConcurrentCalls = 4
 	defaultMaxRetries         = 3
+	defaultTimeout            = 30 * time.Second
 	defaultLogLevel           = LogLevelInfo
 )
 
@@ -63,6 +67,9 @@ type MesheryConfig struct {
 
 	// MaxRetries bounds 429/503 retries per Cloud call.
 	MaxRetries int `mapstructure:"max_retries"`
+
+	// Timeout bounds each HTTP request, including reading the body.
+	Timeout time.Duration `mapstructure:"timeout"`
 }
 
 // LogConfig holds logging settings.
@@ -79,6 +86,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault(keyMesheryKeychainScope, "")
 	v.SetDefault(keyMesheryMaxConcurrentCalls, defaultMaxConcurrentCalls)
 	v.SetDefault(keyMesheryMaxRetries, defaultMaxRetries)
+	v.SetDefault(keyMesheryTimeout, defaultTimeout)
 	v.SetDefault(keyLogLevel, defaultLogLevel)
 
 	if configPath != "" {
@@ -95,6 +103,7 @@ func Load(configPath string) (*Config, error) {
 	v.MustBindEnv(keyMesheryKeychainScope, envMesheryKeychainScope)
 	v.MustBindEnv(keyMesheryMaxConcurrentCalls, envMesheryMaxConcurrentCalls)
 	v.MustBindEnv(keyMesheryMaxRetries, envMesheryMaxRetries)
+	v.MustBindEnv(keyMesheryTimeout, envMesheryTimeout)
 	v.MustBindEnv(keyLogLevel, envLogLevel)
 
 	var cfg Config
@@ -132,6 +141,9 @@ func (c *Config) validate() error {
 	}
 	if c.Meshery.MaxRetries < 0 {
 		return ErrInvalidMaxRetries(c.Meshery.MaxRetries)
+	}
+	if c.Meshery.Timeout <= 0 {
+		return ErrInvalidTimeout(c.Meshery.Timeout)
 	}
 	return nil
 }
