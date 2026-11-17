@@ -44,7 +44,7 @@ func TestListRelationships(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	t.Run("nil result becomes an empty list", func(t *testing.T) {
-		h := &relationshipHandler{registry: &fakeRegistry{}}
+		h := &relationshipHandler{registry: &fakeBackend{}}
 
 		_, out, err := h.listRelationships(context.Background(), nil, ListRelationshipsIn{})
 		if err != nil {
@@ -55,23 +55,42 @@ func TestListRelationships(t *testing.T) {
 		}
 	})
 
-	t.Run("passes the model filter through", func(t *testing.T) {
-		fake := &fakeRegistry{}
+	t.Run("passes the model and page through, and reports paging", func(t *testing.T) {
+		fake := &fakeBackend{total: 120}
 		h := &relationshipHandler{registry: fake}
 
-		in := ListRelationshipsIn{Model: "kubernetes"}
-		if _, _, err := h.listRelationships(context.Background(), nil, in); err != nil {
+		in := ListRelationshipsIn{Model: "kubernetes", PageIn: PageIn{Page: 1}}
+		_, out, err := h.listRelationships(context.Background(), nil, in)
+		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if fake.gotModel != in.Model {
-			t.Errorf("registry got model %q, want %q", fake.gotModel, in.Model)
+		if fake.gotModel != in.Model || fake.gotPage != (Page{Index: 1, Size: defaultPageSize}) {
+			t.Errorf("registry got model %q page %+v", fake.gotModel, fake.gotPage)
+		}
+		if out.PageOut != (PageOut{Page: 1, PageSize: defaultPageSize, TotalCount: 120, HasMore: true}) {
+			t.Errorf("PageOut = %+v", out.PageOut)
+		}
+	})
+
+	t.Run("invalid page skips the registry", func(t *testing.T) {
+		fake := &fakeBackend{}
+		h := &relationshipHandler{registry: fake}
+
+		_, _, err := h.listRelationships(context.Background(), nil, ListRelationshipsIn{PageIn: PageIn{Page: -2}})
+		wantError(t, err, ErrNegativeArgumentCode, `"page"`)
+		if fake.calls != 0 {
+			t.Errorf("registry calls = %d, want 0", fake.calls)
 		}
 	})
 
 	t.Run("wraps registry errors", func(t *testing.T) {
-		h := &relationshipHandler{registry: &fakeRegistry{err: errBoom}}
+		h := &relationshipHandler{registry: &fakeBackend{err: errBoom}}
 
 		_, _, err := h.listRelationships(context.Background(), nil, ListRelationshipsIn{})
 		wantError(t, err, ErrListRelationshipsCode, "boom")
 	})
+}
+
+func TestRelationshipTools_Spec(t *testing.T) {
+	wantTool(t, "list_relationships", toolSpec{readOnly: true, notImplemented: true})
 }

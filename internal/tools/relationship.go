@@ -7,11 +7,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// RelationshipRegistry is what the relationship tools need from Meshery.
 type RelationshipRegistry interface {
-	// ListRelationships returns relationship definitions of the Meshery model
-	// with this name; an empty model returns them for every model.
-	ListRelationships(ctx context.Context, model string) ([]relationshipv1alpha3.RelationshipDefinition, error)
+	// An empty model lists relationships of every model.
+	ListRelationships(ctx context.Context, model string, p Page) (Result[relationshipv1alpha3.RelationshipDefinition], error)
 }
 
 type relationshipHandler struct {
@@ -28,7 +26,6 @@ func relationshipToolset(r RelationshipRegistry) toolset {
 	}
 }
 
-// RelationshipSummary is the part of a relationship definition the AI sees.
 type RelationshipSummary struct {
 	ID          string `json:"id" jsonschema:"ID of the relationship"`
 	Kind        string `json:"kind" jsonschema:"kind of relationship: hierarchical, edge or sibling"`
@@ -61,20 +58,25 @@ var listRelationshipsTool = &mcp.Tool{
 
 type ListRelationshipsIn struct {
 	Model string `json:"model,omitempty" jsonschema:"only return relationships of the Meshery model with this name, for example kubernetes"`
+	PageIn
 }
 
 type ListRelationshipsOut struct {
-	Relationships []RelationshipSummary `json:"relationships" jsonschema:"relationship definitions"`
+	Relationships []RelationshipSummary `json:"relationships" jsonschema:"relationship definitions on this page"`
+	PageOut
 }
 
 func (h *relationshipHandler) listRelationships(ctx context.Context, _ *mcp.CallToolRequest, in ListRelationshipsIn) (*mcp.CallToolResult, ListRelationshipsOut, error) {
-	relationships, err := h.registry.ListRelationships(ctx, in.Model)
+	p, err := in.resolve()
 	if err != nil {
-		return nil, ListRelationshipsOut{}, fromRegistry(err, ErrListRelationships)
+		return nil, ListRelationshipsOut{}, err
 	}
-	out := ListRelationshipsOut{Relationships: make([]RelationshipSummary, 0, len(relationships))}
-	for _, r := range relationships {
-		out.Relationships = append(out.Relationships, relationshipSummary(r))
+	res, err := h.registry.ListRelationships(ctx, in.Model, p)
+	if err != nil {
+		return nil, ListRelationshipsOut{}, fromBackend(err, ErrListRelationships)
 	}
-	return nil, out, nil
+	return nil, ListRelationshipsOut{
+		Relationships: mapItems(res.Items, relationshipSummary),
+		PageOut:       p.out(res.Total),
+	}, nil
 }

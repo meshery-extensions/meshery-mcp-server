@@ -2,22 +2,17 @@ package tools
 
 import (
 	"context"
+	"errors"
 
+	"github.com/gofrs/uuid"
 	modelv1beta1 "github.com/meshery/schemas/models/v1beta1/model"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const (
-	defaultPageSize = 25
-	maxPageSize     = 100
-)
-
-// ModelRegistry is what the model tools need from Meshery.
 type ModelRegistry interface {
-	// ListModels returns one page of models whose name matches search; an
-	// empty search matches every model.
-	ListModels(ctx context.Context, search string, page, pageSize int) ([]modelv1beta1.ModelDefinition, error)
-	GetModel(ctx context.Context, id string) (modelv1beta1.ModelDefinition, error)
+	// An empty search matches every model.
+	ListModels(ctx context.Context, search string, p Page) (Result[modelv1beta1.ModelDefinition], error)
+	GetModel(ctx context.Context, id uuid.UUID) (modelv1beta1.ModelDefinition, error)
 }
 
 type modelHandler struct {
@@ -35,7 +30,6 @@ func modelToolset(r ModelRegistry) toolset {
 	}
 }
 
-// ModelSummary is the part of a Meshery model definition the AI sees.
 type ModelSummary struct {
 	ID          string `json:"id" jsonschema:"ID of the model; pass it to get_model"`
 	Name        string `json:"name" jsonschema:"name of the model, for example kubernetes"`
@@ -62,37 +56,28 @@ var listModelsTool = &mcp.Tool{
 }
 
 type ListModelsIn struct {
-	Search   string `json:"search,omitempty" jsonschema:"text to match against model names"`
-	Page     int    `json:"page,omitempty" jsonschema:"zero-based page index; defaults to 0"`
-	PageSize int    `json:"pageSize,omitempty" jsonschema:"results per page; defaults to 25, at most 100"`
+	Search string `json:"search,omitempty" jsonschema:"text to match against model names"`
+	PageIn
 }
 
 type ListModelsOut struct {
 	Models []ModelSummary `json:"models" jsonschema:"models on this page"`
+	PageOut
 }
 
 func (h *modelHandler) listModels(ctx context.Context, _ *mcp.CallToolRequest, in ListModelsIn) (*mcp.CallToolResult, ListModelsOut, error) {
-	if in.Page < 0 {
-		return nil, ListModelsOut{}, ErrNegativeArgument("page", in.Page)
-	}
-	switch {
-	case in.PageSize < 0:
-		return nil, ListModelsOut{}, ErrNegativeArgument("pageSize", in.PageSize)
-	case in.PageSize == 0:
-		in.PageSize = defaultPageSize
-	case in.PageSize > maxPageSize:
-		in.PageSize = maxPageSize
-	}
-
-	models, err := h.registry.ListModels(ctx, in.Search, in.Page, in.PageSize)
+	p, err := in.resolve()
 	if err != nil {
-		return nil, ListModelsOut{}, fromRegistry(err, ErrListModels)
+		return nil, ListModelsOut{}, err
 	}
-	out := ListModelsOut{Models: make([]ModelSummary, 0, len(models))}
-	for _, m := range models {
-		out.Models = append(out.Models, modelSummary(m))
+	res, err := h.registry.ListModels(ctx, in.Search, p)
+	if err != nil {
+		return nil, ListModelsOut{}, fromBackend(err, ErrListModels)
 	}
-	return nil, out, nil
+	return nil, ListModelsOut{
+		Models:  mapItems(res.Items, modelSummary),
+		PageOut: p.out(res.Total),
+	}, nil
 }
 
 var getModelTool = &mcp.Tool{
@@ -114,12 +99,16 @@ type GetModelOut struct {
 }
 
 func (h *modelHandler) getModel(ctx context.Context, _ *mcp.CallToolRequest, in GetModelIn) (*mcp.CallToolResult, GetModelOut, error) {
-	if in.ID == "" {
-		return nil, GetModelOut{}, ErrRequiredArgument("id")
-	}
-	m, err := h.registry.GetModel(ctx, in.ID)
+	id, err := parseID("id", in.ID)
 	if err != nil {
-		return nil, GetModelOut{}, fromRegistry(err, func(err error) error { return ErrGetModel(err, in.ID) })
+		return nil, GetModelOut{}, err
+	}
+	m, err := h.registry.GetModel(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return nil, GetModelOut{}, ErrModelNotFound(id.String())
+	}
+	if err != nil {
+		return nil, GetModelOut{}, fromBackend(err, func(err error) error { return ErrGetModel(err, id.String()) })
 	}
 	return nil, GetModelOut{
 		Model:              modelSummary(m),

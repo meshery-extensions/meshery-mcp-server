@@ -2,8 +2,6 @@ package meshery
 
 import "github.com/meshery-extensions/meshery-mcp-server/internal/tools"
 
-// Registry implements tools.Registry on top of a Meshery client. Each embedded
-// type owns one domain's endpoints and response mapping.
 type Registry struct {
 	*Components
 	*Models
@@ -18,4 +16,4 @@ func NewRegistry(c *Client) *Registry {
 	}
 }
 
-var _ tools.Registry = (*Registry)(nil)
+var _ tools.Backend = (*Registry)(nil)

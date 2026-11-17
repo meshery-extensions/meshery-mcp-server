@@ -39,76 +39,76 @@ func TestModelSummary(t *testing.T) {
 	}
 }
 
-func TestListModels_Pagination(t *testing.T) {
-	tests := []struct {
-		name         string
-		in           ListModelsIn
-		wantPage     int
-		wantPageSize int
-		wantErr      string // argument named in the error; "" = expect success
-	}{
-		{name: "defaults", in: ListModelsIn{}, wantPage: 0, wantPageSize: defaultPageSize},
-		{name: "explicit values", in: ListModelsIn{Page: 2, PageSize: 10}, wantPage: 2, wantPageSize: 10},
-		{name: "page size is capped", in: ListModelsIn{PageSize: 500}, wantPageSize: maxPageSize},
-		{name: "negative page", in: ListModelsIn{Page: -1}, wantErr: "page"},
-		{name: "negative page size", in: ListModelsIn{PageSize: -1}, wantErr: "pageSize"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fake := &fakeRegistry{}
-			h := &modelHandler{registry: fake}
-
-			_, _, err := h.listModels(context.Background(), nil, tt.in)
-			if tt.wantErr != "" {
-				wantError(t, err, ErrNegativeArgumentCode, `"`+tt.wantErr+`"`)
-				if fake.calls != 0 {
-					t.Errorf("registry calls = %d, want 0", fake.calls)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if fake.gotPage != tt.wantPage || fake.gotPageSize != tt.wantPageSize {
-				t.Errorf("registry got page=%d pageSize=%d, want %d/%d",
-					fake.gotPage, fake.gotPageSize, tt.wantPage, tt.wantPageSize)
-			}
-		})
-	}
-}
-
-func TestListModels_NilBecomesEmpty(t *testing.T) {
-	h := &modelHandler{registry: &fakeRegistry{}}
-
-	_, out, err := h.listModels(context.Background(), nil, ListModelsIn{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Models == nil || len(out.Models) != 0 {
-		t.Errorf("Models = %#v, want empty non-nil slice", out.Models)
-	}
-}
-
-func TestGetModel(t *testing.T) {
-	errBoom := errors.New("boom")
-
-	t.Run("empty id skips the registry", func(t *testing.T) {
-		fake := &fakeRegistry{}
+func TestListModels(t *testing.T) {
+	t.Run("passes the page through and reports paging", func(t *testing.T) {
+		fake := &fakeBackend{models: []modelv1beta1.ModelDefinition{kubernetesModel(t)}, total: 3}
 		h := &modelHandler{registry: fake}
 
-		_, _, err := h.getModel(context.Background(), nil, GetModelIn{})
-		wantError(t, err, ErrRequiredArgumentCode, `"id"`)
+		_, out, err := h.listModels(context.Background(), nil, ListModelsIn{PageIn: PageIn{Page: 2, PageSize: 1}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if fake.gotPage != (Page{Index: 2, Size: 1}) {
+			t.Errorf("registry got page %+v", fake.gotPage)
+		}
+		if out.PageOut != (PageOut{Page: 2, PageSize: 1, TotalCount: 3, HasMore: false}) {
+			t.Errorf("PageOut = %+v", out.PageOut)
+		}
+	})
+
+	t.Run("invalid page skips the registry", func(t *testing.T) {
+		fake := &fakeBackend{}
+		h := &modelHandler{registry: fake}
+
+		_, _, err := h.listModels(context.Background(), nil, ListModelsIn{PageIn: PageIn{PageSize: -1}})
+		wantError(t, err, ErrNegativeArgumentCode, `"pageSize"`)
 		if fake.calls != 0 {
 			t.Errorf("registry calls = %d, want 0", fake.calls)
 		}
 	})
 
+	t.Run("nil result becomes an empty list", func(t *testing.T) {
+		h := &modelHandler{registry: &fakeBackend{}}
+
+		_, out, err := h.listModels(context.Background(), nil, ListModelsIn{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Models == nil || len(out.Models) != 0 {
+			t.Errorf("Models = %#v, want empty non-nil slice", out.Models)
+		}
+	})
+}
+
+func TestGetModel(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	t.Run("invalid id skips the registry", func(t *testing.T) {
+		for _, tt := range []struct{ id, code string }{
+			{id: "", code: ErrRequiredArgumentCode},
+			{id: "m1", code: ErrInvalidIDCode},
+		} {
+			fake := &fakeBackend{}
+			h := &modelHandler{registry: fake}
+
+			_, _, err := h.getModel(context.Background(), nil, GetModelIn{ID: tt.id})
+			wantError(t, err, tt.code, `"id"`)
+			if fake.calls != 0 {
+				t.Errorf("%q: registry calls = %d, want 0", tt.id, fake.calls)
+			}
+		}
+	})
+
 	t.Run("returns summary, description and counts", func(t *testing.T) {
-		h := &modelHandler{registry: &fakeRegistry{model: kubernetesModel(t)}}
+		fake := &fakeBackend{model: kubernetesModel(t)}
+		h := &modelHandler{registry: fake}
 
 		_, out, err := h.getModel(context.Background(), nil, GetModelIn{ID: modelID})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if fake.gotID.String() != modelID {
+			t.Errorf("registry got id %s, want %s", fake.gotID, modelID)
 		}
 		if out.Model.Name != "kubernetes" || out.Description != "Container orchestration" ||
 			out.ComponentsCount != 3 || out.RelationshipsCount != 2 {
@@ -116,10 +116,26 @@ func TestGetModel(t *testing.T) {
 		}
 	})
 
-	t.Run("wraps registry errors", func(t *testing.T) {
-		h := &modelHandler{registry: &fakeRegistry{err: errBoom}}
+	t.Run("not found is reported as such", func(t *testing.T) {
+		h := &modelHandler{registry: &fakeBackend{err: ErrNotFound}}
 
-		_, _, err := h.getModel(context.Background(), nil, GetModelIn{ID: "m1"})
-		wantError(t, err, ErrGetModelCode, `"m1"`, "boom")
+		_, _, err := h.getModel(context.Background(), nil, GetModelIn{ID: modelID})
+		wantError(t, err, ErrModelNotFoundCode, modelID)
+	})
+
+	t.Run("wraps registry errors", func(t *testing.T) {
+		h := &modelHandler{registry: &fakeBackend{err: errBoom}}
+
+		_, _, err := h.getModel(context.Background(), nil, GetModelIn{ID: modelID})
+		wantError(t, err, ErrGetModelCode, modelID, "boom")
+	})
+}
+
+func TestModelTools_Spec(t *testing.T) {
+	t.Run("list_models", func(t *testing.T) {
+		wantTool(t, "list_models", toolSpec{readOnly: true, notImplemented: true})
+	})
+	t.Run("get_model", func(t *testing.T) {
+		wantTool(t, "get_model", toolSpec{required: []string{"id"}, readOnly: true, notImplemented: true})
 	})
 }

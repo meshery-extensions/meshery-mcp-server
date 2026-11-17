@@ -81,4 +81,5 @@ docker-run: docker-build
 		--add-host=host.docker.internal:host-gateway \
 		-e MESHERY_SERVER_URL=$(DOCKER_MESHERY_SERVER_URL) \
 		-e MESHERY_API_TOKEN \
+		-e MESHERY_PROVIDER \
 		$(DOCKER_IMAGE):$(GIT_VERSION) $(ARGS)

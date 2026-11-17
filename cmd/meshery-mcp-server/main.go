@@ -42,8 +42,7 @@ func main() {
 	}
 }
 
-// run returns the logger to report its error with: the boot logger if the
-// config could not be loaded, the configured logger otherwise.
+// run returns the logger to report its error with.
 func run(boot logger.Handler) (logger.Handler, error) {
 	configPath := flag.String("config", "", "path to a YAML config file (optional)")
 	transport := flag.String("transport", "", "stdio or http (default stdio; env MESHERY_MCP_TRANSPORT)")
@@ -51,7 +50,8 @@ func run(boot logger.Handler) (logger.Handler, error) {
 	port := flag.Int("port", 0, "http only: port to listen on (default 8080; env MESHERY_MCP_PORT)")
 	flag.Parse()
 
-	// Only flags given on the command line override the environment and file.
+	// Visit sees only flags set on the command line, so defaults don't
+	// override the environment or file.
 	var flags config.Flags
 	flag.Visit(func(f *flag.Flag) {
 		switch f.Name {
@@ -73,33 +73,33 @@ func run(boot logger.Handler) (logger.Handler, error) {
 		return boot, err
 	}
 
-	log.Infof("starting %s version=%s commit=%s meshery_url=%s token_configured=%t transport=%s",
-		appName, version, commitsha, cfg.Meshery.RedactedURL(), cfg.Auth.Token != "", cfg.Transport.Mode)
+	log.Infof("starting %s version=%s commit=%s meshery_url=%s transport=%s provider=%s token_configured=%t",
+		appName, version, commitsha, cfg.Meshery.RedactedURL(), cfg.Transport.Mode,
+		cfg.Transport.Stdio.Provider, cfg.Transport.Stdio.Token != "")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
-		// After the first signal, restore default handling so a second
-		// Ctrl+C exits immediately instead of waiting for shutdown.
+		// A second Ctrl+C exits at once instead of waiting for shutdown.
 		<-ctx.Done()
 		stop()
 	}()
 
 	opts := mcpserver.Options{
-		Name:        appName,
-		Version:     version,
-		Logger:      sdkLog,
-		Registry:    meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL)),
-		Credentials: auth.Resolver(cfg.Auth),
+		Name:    appName,
+		Version: version,
+		Logger:  sdkLog,
+		Backend: meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL)),
 	}
 
 	switch cfg.Transport.Mode {
 	case config.TransportHTTP:
+		httpCfg := cfg.Transport.HTTP
 		err = mcpserver.RunHTTP(ctx, opts, mcpserver.HTTPOptions{
-			Addr:      net.JoinHostPort(cfg.Transport.Host, strconv.Itoa(cfg.Transport.Port)),
-			AccessKey: string(cfg.Transport.AccessKey),
+			Addr: net.JoinHostPort(httpCfg.Host, strconv.Itoa(httpCfg.Port)),
 		})
 	default:
+		opts.Credentials = auth.Resolver(cfg.Transport.Stdio)
 		err = mcpserver.RunStdio(ctx, opts)
 	}
 	if err != nil {

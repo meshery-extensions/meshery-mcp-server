@@ -1,7 +1,5 @@
-// Package logging builds the server's two loggers: the MeshKit logger the
-// server itself uses, and the slog logger the MCP SDK takes. Both write the
-// same fields (time, level, msg, app) in the same format, so a log collector
-// sees one shape whichever logger wrote a line.
+// Package logging builds the MeshKit logger the server uses and the slog
+// logger the MCP SDK takes, writing the same fields in the same format.
 package logging
 
 import (
@@ -16,9 +14,7 @@ import (
 	"github.com/meshery-extensions/meshery-mcp-server/internal/config"
 )
 
-// New returns the MeshKit logger and the SDK logger for format and level,
-// both writing to w. Over stdio, w must not be stdout, which carries the
-// MCP protocol.
+// Over stdio, w must not be stdout, which carries the MCP protocol.
 func New(app, format, level string, w io.Writer) (logger.Handler, *slog.Logger, error) {
 	meshkitFormat := logger.Format(logger.SyslogLogFormat)
 	if format == config.LogFormatJSON {
@@ -42,9 +38,7 @@ func New(app, format, level string, w io.Writer) (logger.Handler, *slog.Logger, 
 	return mk, slog.New(h).With("app", app), nil
 }
 
-// likeMeshKit writes slog's time and level the way MeshKit's logrus
-// formatters do: RFC 3339 time to the second, and lowercase level names
-// with "warning" for warn.
+// likeMeshKit matches logrus: RFC 3339 seconds, lowercase levels, "warning".
 func likeMeshKit(groups []string, a slog.Attr) slog.Attr {
 	if len(groups) > 0 {
 		return a

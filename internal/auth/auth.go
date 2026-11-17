@@ -1,5 +1,4 @@
-// Package auth decides whose Meshery identity each request uses, and attaches
-// it to the request's context.
+// Package auth attaches each request's Meshery identity to its context.
 package auth
 
 import (
@@ -11,23 +10,15 @@ import (
 	"github.com/meshery-extensions/meshery-mcp-server/internal/meshery"
 )
 
-// Resolver returns the function the MCP server runs before every request.
-// With a token, that function attaches it to the request's context, so every
-// request uses the identity of the user who started the server. Without one,
-// Resolver returns nil and requests carry no token, as with Meshery's Local
-// provider.
-//
-// Transports that serve several users will need a resolver that takes the
-// identity from each request instead; that resolver goes here.
-//
-// The returned type is unnamed so it can be assigned to the server's
-// credentials option without this package importing the server.
-func Resolver(cfg config.AuthConfig) func(context.Context, mcp.Request) (context.Context, error) {
-	if cfg.Token == "" {
+// Resolver gives every stdio request the identity of the user who started
+// the server. It must not be used for http, where each client has its own.
+// The return type is unnamed so this package need not import the server.
+func Resolver(cfg config.StdioConfig) func(context.Context, mcp.Request) (context.Context, error) {
+	creds := meshery.Credentials{Provider: cfg.Provider, Token: string(cfg.Token)}
+	if creds == (meshery.Credentials{}) {
 		return nil
 	}
-	token := string(cfg.Token)
 	return func(ctx context.Context, _ mcp.Request) (context.Context, error) {
-		return meshery.WithToken(ctx, token), nil
+		return meshery.WithCredentials(ctx, creds), nil
 	}
 }

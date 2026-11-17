@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	modelv1beta1 "github.com/meshery/schemas/models/v1beta1/model"
@@ -47,19 +49,42 @@ func TestComponentSummary(t *testing.T) {
 func TestSearchComponents(t *testing.T) {
 	errBoom := errors.New("boom")
 
-	t.Run("empty query skips the registry", func(t *testing.T) {
-		fake := &fakeRegistry{}
+	t.Run("query or model is required", func(t *testing.T) {
+		fake := &fakeBackend{}
 		h := &componentHandler{registry: fake}
 
 		_, _, err := h.searchComponents(context.Background(), nil, SearchComponentsIn{})
-		wantError(t, err, ErrRequiredArgumentCode, `"query"`)
+		wantError(t, err, ErrRequiredOneOfCode, "query", "model")
+		if fake.calls != 0 {
+			t.Errorf("registry calls = %d, want 0", fake.calls)
+		}
+	})
+
+	t.Run("model alone is enough", func(t *testing.T) {
+		fake := &fakeBackend{}
+		h := &componentHandler{registry: fake}
+
+		if _, _, err := h.searchComponents(context.Background(), nil, SearchComponentsIn{Model: "kubernetes"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if fake.gotModel != "kubernetes" || fake.gotQuery != "" {
+			t.Errorf("registry got query=%q model=%q", fake.gotQuery, fake.gotModel)
+		}
+	})
+
+	t.Run("invalid page skips the registry", func(t *testing.T) {
+		fake := &fakeBackend{}
+		h := &componentHandler{registry: fake}
+
+		_, _, err := h.searchComponents(context.Background(), nil, SearchComponentsIn{Query: "pod", PageIn: PageIn{Page: -1}})
+		wantError(t, err, ErrNegativeArgumentCode, `"page"`)
 		if fake.calls != 0 {
 			t.Errorf("registry calls = %d, want 0", fake.calls)
 		}
 	})
 
 	t.Run("nil result becomes an empty list", func(t *testing.T) {
-		h := &componentHandler{registry: &fakeRegistry{}}
+		h := &componentHandler{registry: &fakeBackend{}}
 
 		_, out, err := h.searchComponents(context.Background(), nil, SearchComponentsIn{Query: "pod"})
 		if err != nil {
@@ -70,25 +95,28 @@ func TestSearchComponents(t *testing.T) {
 		}
 	})
 
-	t.Run("passes filters through and maps results", func(t *testing.T) {
-		fake := &fakeRegistry{components: []componentv1beta3.ComponentDefinition{podDefinition(t)}}
+	t.Run("passes filters and page through, and reports paging", func(t *testing.T) {
+		fake := &fakeBackend{components: []componentv1beta3.ComponentDefinition{podDefinition(t)}, total: 30}
 		h := &componentHandler{registry: fake}
 
-		in := SearchComponentsIn{Query: "pod", Kind: "Pod", Model: "kubernetes"}
+		in := SearchComponentsIn{Query: "pod", Model: "kubernetes", PageIn: PageIn{Page: 1, PageSize: 10}}
 		_, out, err := h.searchComponents(context.Background(), nil, in)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if fake.gotQuery != "pod" || fake.gotKind != "Pod" || fake.gotModel != "kubernetes" {
-			t.Errorf("registry got query=%q kind=%q model=%q", fake.gotQuery, fake.gotKind, fake.gotModel)
+		if fake.gotQuery != "pod" || fake.gotModel != "kubernetes" || fake.gotPage != (Page{Index: 1, Size: 10}) {
+			t.Errorf("registry got query=%q model=%q page=%+v", fake.gotQuery, fake.gotModel, fake.gotPage)
 		}
 		if len(out.Components) != 1 || out.Components[0].ID != componentID {
 			t.Errorf("Components = %+v, want the mapped pod", out.Components)
 		}
+		if out.PageOut != (PageOut{Page: 1, PageSize: 10, TotalCount: 30, HasMore: true}) {
+			t.Errorf("PageOut = %+v", out.PageOut)
+		}
 	})
 
 	t.Run("wraps registry errors", func(t *testing.T) {
-		h := &componentHandler{registry: &fakeRegistry{err: errBoom}}
+		h := &componentHandler{registry: &fakeBackend{err: errBoom}}
 
 		_, _, err := h.searchComponents(context.Background(), nil, SearchComponentsIn{Query: "pod"})
 		wantError(t, err, ErrSearchComponentsCode, "boom")
@@ -98,37 +126,95 @@ func TestSearchComponents(t *testing.T) {
 func TestGetComponent(t *testing.T) {
 	errBoom := errors.New("boom")
 
-	t.Run("empty id skips the registry", func(t *testing.T) {
-		fake := &fakeRegistry{}
-		h := &componentHandler{registry: fake}
+	t.Run("invalid id skips the registry", func(t *testing.T) {
+		for _, tt := range []struct{ id, code string }{
+			{id: "", code: ErrRequiredArgumentCode},
+			{id: "c1", code: ErrInvalidIDCode},
+		} {
+			fake := &fakeBackend{}
+			h := &componentHandler{registry: fake}
 
-		_, _, err := h.getComponent(context.Background(), nil, GetComponentIn{})
-		wantError(t, err, ErrRequiredArgumentCode, `"id"`)
-		if fake.calls != 0 {
-			t.Errorf("registry calls = %d, want 0", fake.calls)
+			_, _, err := h.getComponent(context.Background(), nil, GetComponentIn{ID: tt.id})
+			wantError(t, err, tt.code, `"id"`)
+			if fake.calls != 0 {
+				t.Errorf("%q: registry calls = %d, want 0", tt.id, fake.calls)
+			}
 		}
 	})
 
-	t.Run("returns summary, description and schema", func(t *testing.T) {
-		fake := &fakeRegistry{component: podDefinition(t)}
+	t.Run("passes the id on in canonical form", func(t *testing.T) {
+		fake := &fakeBackend{component: podDefinition(t)}
 		h := &componentHandler{registry: fake}
+
+		if _, _, err := h.getComponent(context.Background(), nil, GetComponentIn{ID: strings.ToUpper(componentID)}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if fake.gotID.String() != componentID {
+			t.Errorf("registry got id %s, want %s", fake.gotID, componentID)
+		}
+	})
+
+	t.Run("returns summary, description and schema as an object", func(t *testing.T) {
+		h := &componentHandler{registry: &fakeBackend{component: podDefinition(t)}}
 
 		_, out, err := h.getComponent(context.Background(), nil, GetComponentIn{ID: componentID})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if fake.gotID != componentID {
-			t.Errorf("registry got id %q, want %q", fake.gotID, componentID)
-		}
-		if out.Component.Kind != "Pod" || out.Description != "A group of containers" || out.Schema != `{"type":"object"}` {
+		if out.Component.Kind != "Pod" || out.Description != "A group of containers" {
 			t.Errorf("out = %+v", out)
+		}
+		if out.Schema["type"] != "object" {
+			t.Errorf("Schema = %#v, want the decoded object", out.Schema)
 		}
 	})
 
-	t.Run("wraps registry errors", func(t *testing.T) {
-		h := &componentHandler{registry: &fakeRegistry{err: errBoom}}
+	t.Run("empty schema is left out", func(t *testing.T) {
+		c := podDefinition(t)
+		c.Component.Schema = ""
+		h := &componentHandler{registry: &fakeBackend{component: c}}
 
-		_, _, err := h.getComponent(context.Background(), nil, GetComponentIn{ID: "c1"})
-		wantError(t, err, ErrGetComponentCode, `"c1"`, "boom")
+		_, out, err := h.getComponent(context.Background(), nil, GetComponentIn{ID: componentID})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.Schema != nil {
+			t.Errorf("Schema = %#v, want nil", out.Schema)
+		}
+	})
+
+	t.Run("schema that is not a JSON object is an error", func(t *testing.T) {
+		for _, schema := range []string{"{not json", `"a string"`, "[1, 2]"} {
+			c := podDefinition(t)
+			c.Component.Schema = schema
+			h := &componentHandler{registry: &fakeBackend{component: c}}
+
+			_, _, err := h.getComponent(context.Background(), nil, GetComponentIn{ID: componentID})
+			wantError(t, err, ErrInvalidComponentSchemaCode, componentID)
+		}
+	})
+
+	t.Run("not found is reported as such", func(t *testing.T) {
+		h := &componentHandler{registry: &fakeBackend{err: fmt.Errorf("lookup: %w", ErrNotFound)}}
+
+		_, _, err := h.getComponent(context.Background(), nil, GetComponentIn{ID: componentID})
+		wantError(t, err, ErrComponentNotFoundCode, componentID)
+	})
+
+	t.Run("wraps registry errors", func(t *testing.T) {
+		h := &componentHandler{registry: &fakeBackend{err: errBoom}}
+
+		_, _, err := h.getComponent(context.Background(), nil, GetComponentIn{ID: componentID})
+		wantError(t, err, ErrGetComponentCode, componentID, "boom")
+	})
+}
+
+func TestComponentTools_Spec(t *testing.T) {
+	t.Run("search_components", func(t *testing.T) {
+		// The handler, not the schema, requires query or model.
+		wantTool(t, "search_components", toolSpec{readOnly: true, notImplemented: true})
+	})
+	t.Run("get_component", func(t *testing.T) {
+		wantTool(t, "get_component", toolSpec{required: []string{"id"}, readOnly: true, notImplemented: true})
 	})
 }

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid"
 	relationshipv1alpha3 "github.com/meshery/schemas/models/v1alpha3/relationship"
 	modelv1beta1 "github.com/meshery/schemas/models/v1beta1/model"
 	componentv1beta3 "github.com/meshery/schemas/models/v1beta3/component"
@@ -21,58 +22,53 @@ import (
 	"github.com/meshery-extensions/meshery-mcp-server/internal/tools"
 )
 
-var _ tools.Registry = (*fakeRegistry)(nil)
+var _ tools.Backend = (*fakeBackend)(nil)
 
-// protocolVersions are the versions the server is tested with: 2026-07-28,
-// the current stateless revision, and 2025-11-25, the last revision with an
-// initialize handshake. The SDK serves both; serving the older one is
-// optional under the 2026-07-28 versioning rules.
+// The current revision and the last one with an initialize handshake.
 var protocolVersions = []string{"2026-07-28", "2025-11-25"}
 
-// fakeRegistry implements tools.Registry and records the token each call saw.
-type fakeRegistry struct {
-	gotToken string
+type fakeBackend struct {
+	gotCreds meshery.Credentials
 	gotOK    bool
 }
 
-func (f *fakeRegistry) record(ctx context.Context) {
-	f.gotToken, f.gotOK = meshery.TokenFromContext(ctx)
+func (f *fakeBackend) record(ctx context.Context) {
+	f.gotCreds, f.gotOK = meshery.CredentialsFromContext(ctx)
 }
 
-func (f *fakeRegistry) SearchComponents(ctx context.Context, _, _, _ string) ([]componentv1beta3.ComponentDefinition, error) {
+func (f *fakeBackend) SearchComponents(ctx context.Context, _, _ string, _ tools.Page) (tools.Result[componentv1beta3.ComponentDefinition], error) {
 	f.record(ctx)
-	return nil, nil
+	return tools.Result[componentv1beta3.ComponentDefinition]{}, nil
 }
 
-func (f *fakeRegistry) GetComponent(ctx context.Context, _ string) (componentv1beta3.ComponentDefinition, error) {
+func (f *fakeBackend) GetComponent(ctx context.Context, _ uuid.UUID) (componentv1beta3.ComponentDefinition, error) {
 	f.record(ctx)
 	return componentv1beta3.ComponentDefinition{}, nil
 }
 
-func (f *fakeRegistry) ListModels(ctx context.Context, _ string, _, _ int) ([]modelv1beta1.ModelDefinition, error) {
+func (f *fakeBackend) ListModels(ctx context.Context, _ string, _ tools.Page) (tools.Result[modelv1beta1.ModelDefinition], error) {
 	f.record(ctx)
-	return nil, nil
+	return tools.Result[modelv1beta1.ModelDefinition]{}, nil
 }
 
-func (f *fakeRegistry) GetModel(ctx context.Context, _ string) (modelv1beta1.ModelDefinition, error) {
+func (f *fakeBackend) GetModel(ctx context.Context, _ uuid.UUID) (modelv1beta1.ModelDefinition, error) {
 	f.record(ctx)
 	return modelv1beta1.ModelDefinition{}, nil
 }
 
-func (f *fakeRegistry) ListRelationships(ctx context.Context, _ string) ([]relationshipv1alpha3.RelationshipDefinition, error) {
+func (f *fakeBackend) ListRelationships(ctx context.Context, _ string, _ tools.Page) (tools.Result[relationshipv1alpha3.RelationshipDefinition], error) {
 	f.record(ctx)
-	return nil, nil
+	return tools.Result[relationshipv1alpha3.RelationshipDefinition]{}, nil
 }
 
-func staticToken(token string) CredentialsFunc {
+var testCreds = meshery.Credentials{Provider: "Meshery", Token: "abc"}
+
+func staticCredentials(creds meshery.Credentials) CredentialsFunc {
 	return func(ctx context.Context, _ mcp.Request) (context.Context, error) {
-		return meshery.WithToken(ctx, token), nil
+		return meshery.WithCredentials(ctx, creds), nil
 	}
 }
 
-// start runs the server on one end of an in-memory transport and returns a
-// client session speaking protocolVersion, the cancel func for the server's
-// context, and a channel that receives the server's return value.
 func start(t *testing.T, opts Options, protocolVersion string) (*mcp.ClientSession, context.CancelFunc, <-chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -105,13 +101,13 @@ func wait(t *testing.T, done <-chan error) error {
 func callGetComponent(cs *mcp.ClientSession) (*mcp.CallToolResult, error) {
 	return cs.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "get_component",
-		Arguments: map[string]any{"id": "c1"},
+		Arguments: map[string]any{"id": "5f4e2a1c-8d3b-4c6e-9a7f-1b2c3d4e5f60"},
 	})
 }
 
-func TestNewServer_RequiresRegistry(t *testing.T) {
+func TestNewServer_RequiresBackend(t *testing.T) {
 	if _, err := newServer(Options{Name: "test"}); err == nil {
-		t.Fatal("want error for missing registry, got nil")
+		t.Fatal("want error for missing backend, got nil")
 	}
 }
 
@@ -119,45 +115,71 @@ func TestNewServer_LogsCapabilities(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	if _, err := newServer(Options{Name: "test", Registry: &fakeRegistry{}, Logger: logger}); err != nil {
+	server, err := newServer(Options{Name: "test", Backend: &fakeBackend{}, Logger: logger})
+	if err != nil {
 		t.Fatalf("newServer: %v", err)
 	}
+	// Read the log before connecting: the session logs from another goroutine.
+	logged := capabilitiesLine(t, buf.String())
 
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
-		var entry struct {
-			Msg       string   `json:"msg"`
-			Tools     []string `json:"tools"`
-			Resources []string `json:"resources"`
-			Prompts   []string `json:"prompts"`
-		}
-		if err := json.Unmarshal([]byte(line), &entry); err != nil || entry.Msg != "registered capabilities" {
-			continue
-		}
-		want := []string{"search_components", "get_component", "list_models", "get_model", "list_relationships"}
-		if !slices.Equal(entry.Tools, want) {
-			t.Errorf("tools = %v, want %v", entry.Tools, want)
-		}
-		if entry.Resources == nil || entry.Prompts == nil {
-			t.Errorf("want resources and prompts listed (empty), got %v and %v", entry.Resources, entry.Prompts)
-		}
-		return
+	ctx := context.Background()
+	st, ct := mcp.NewInMemoryTransports()
+	ss, err := server.Connect(ctx, st, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
 	}
-	t.Fatalf("no \"registered capabilities\" line in log output:\n%s", buf.String())
+	t.Cleanup(func() { _ = ss.Close() })
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	res, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	var served []string
+	for _, tool := range res.Tools {
+		served = append(served, tool.Name)
+	}
+	if !slices.Equal(slices.Sorted(slices.Values(logged.Tools)), slices.Sorted(slices.Values(served))) {
+		t.Errorf("logged tools %v, served %v", logged.Tools, served)
+	}
+	if logged.Resources == nil || logged.Prompts == nil {
+		t.Errorf("want resources and prompts listed (empty), got %v and %v", logged.Resources, logged.Prompts)
+	}
+}
+
+type capabilitiesEntry struct {
+	Msg       string   `json:"msg"`
+	Tools     []string `json:"tools"`
+	Resources []string `json:"resources"`
+	Prompts   []string `json:"prompts"`
+}
+
+func capabilitiesLine(t *testing.T, log string) capabilitiesEntry {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(log), "\n") {
+		var entry capabilitiesEntry
+		if err := json.Unmarshal([]byte(line), &entry); err == nil && entry.Msg == "registered capabilities" {
+			return entry
+		}
+	}
+	t.Fatalf("no \"registered capabilities\" line in log output:\n%s", log)
+	return capabilitiesEntry{}
 }
 
 func TestCapabilities_OnlyTools(t *testing.T) {
 	for _, version := range protocolVersions {
 		t.Run(version, func(t *testing.T) {
-			// A 2026-07-28 client reads capabilities from server/discover and
-			// a 2025-11-25 client from initialize; the SDK client keeps
-			// either result in InitializeResult.
-			cs, _, _ := start(t, Options{Name: "test", Registry: &fakeRegistry{}}, version)
+			// From server/discover (2026-07-28) or initialize (2025-11-25).
+			cs, _, _ := start(t, Options{Name: "test", Backend: &fakeBackend{}}, version)
 
 			res := cs.InitializeResult()
 			if res == nil || res.Capabilities == nil {
 				t.Fatal("no capabilities in the result")
 			}
-			// Compare what is sent on the wire: only the tools capability.
 			b, err := json.Marshal(res.Capabilities)
 			if err != nil {
 				t.Fatal(err)
@@ -177,27 +199,27 @@ func TestCapabilities_OnlyTools(t *testing.T) {
 func TestCredentials(t *testing.T) {
 	for _, version := range protocolVersions {
 		t.Run(version+"/token reaches the registry", func(t *testing.T) {
-			fake := &fakeRegistry{}
-			cs, _, _ := start(t, Options{Name: "test", Registry: fake, Credentials: staticToken("abc")}, version)
+			fake := &fakeBackend{}
+			cs, _, _ := start(t, Options{Name: "test", Backend: fake, Credentials: staticCredentials(testCreds)}, version)
 
 			res, err := callGetComponent(cs)
 			if err != nil || res.IsError {
 				t.Fatalf("CallTool: err=%v result=%v", err, res)
 			}
-			if !fake.gotOK || fake.gotToken != "abc" {
-				t.Errorf("registry saw token (%q, %v), want (%q, true)", fake.gotToken, fake.gotOK, "abc")
+			if !fake.gotOK || fake.gotCreds != testCreds {
+				t.Errorf("backend saw credentials (%v, %v), want (%v, true)", fake.gotCreds, fake.gotOK, testCreds)
 			}
 		})
 
 		t.Run(version+"/no credentials means no token", func(t *testing.T) {
-			fake := &fakeRegistry{}
-			cs, _, _ := start(t, Options{Name: "test", Registry: fake}, version)
+			fake := &fakeBackend{}
+			cs, _, _ := start(t, Options{Name: "test", Backend: fake}, version)
 
 			if _, err := callGetComponent(cs); err != nil {
 				t.Fatalf("CallTool: %v", err)
 			}
 			if fake.gotOK {
-				t.Errorf("registry saw token %q, want none", fake.gotToken)
+				t.Errorf("backend saw credentials %v, want none", fake.gotCreds)
 			}
 		})
 
@@ -209,7 +231,7 @@ func TestCredentials(t *testing.T) {
 				}
 				return ctx, nil
 			}
-			cs, _, _ := start(t, Options{Name: "test", Registry: &fakeRegistry{}, Credentials: deny}, version)
+			cs, _, _ := start(t, Options{Name: "test", Backend: &fakeBackend{}, Credentials: deny}, version)
 
 			if _, err := callGetComponent(cs); err == nil {
 				t.Fatal("want a protocol error, got nil")
@@ -221,7 +243,7 @@ func TestCredentials(t *testing.T) {
 func TestRunTransport_CleanShutdown(t *testing.T) {
 	for _, version := range protocolVersions {
 		t.Run(version+"/context cancelled", func(t *testing.T) {
-			_, cancel, done := start(t, Options{Name: "test", Registry: &fakeRegistry{}}, version)
+			_, cancel, done := start(t, Options{Name: "test", Backend: &fakeBackend{}}, version)
 			cancel()
 			if err := wait(t, done); err != nil {
 				t.Errorf("runTransport returned %v, want nil", err)
@@ -229,7 +251,7 @@ func TestRunTransport_CleanShutdown(t *testing.T) {
 		})
 
 		t.Run(version+"/client disconnects", func(t *testing.T) {
-			cs, _, done := start(t, Options{Name: "test", Registry: &fakeRegistry{}}, version)
+			cs, _, done := start(t, Options{Name: "test", Backend: &fakeBackend{}}, version)
 			_ = cs.Close()
 			if err := wait(t, done); err != nil {
 				t.Errorf("runTransport returned %v, want nil", err)
