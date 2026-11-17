@@ -201,6 +201,29 @@ func TestAPIErrorRedactsEveryRetainedField(t *testing.T) {
 	}
 }
 
+func TestAPIErrorRedactsFallbackBeforeTruncation(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		token  string
+		prefix string
+	}{
+		{name: "token crosses limit", token: "secret-token", prefix: strings.Repeat("x", 500)},
+		{name: "token exceeds limit", token: strings.Repeat("secret", 100)},
+		{name: "replacement contains token", token: "REDACTED"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewClient("http://localhost", tt.token)
+			body := "  " + tt.prefix + tt.token + strings.Repeat("z", 600) + "  "
+			err := c.apiError(http.MethodGet, "/api/ledgers", http.StatusBadRequest, []byte(body), tt.token)
+			want := tt.prefix + "[REDACTED]" + strings.Repeat("z", 600)
+			want = want[:512] + "..."
+			if err.Message != want {
+				t.Errorf("Message = %q, want %q", err.Message, want)
+			}
+		})
+	}
+}
+
 func TestCall429HonorsRetryAfter(t *testing.T) {
 	srv, mock := newMockCloud(t,
 		scenario{status: 429, retryAfter: "1"},

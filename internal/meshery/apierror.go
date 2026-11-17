@@ -48,19 +48,7 @@ func (e *APIError) Is(target error) bool { return target != nil && target == e.K
 // apiError builds an APIError and removes the token captured for this request
 // from every server-supplied field retained in the error.
 func (c *Client) apiError(method, path string, status int, body []byte, token string) *APIError {
-	e := newAPIError(method, path, status, body)
-	if token == "" {
-		return e
-	}
-	e.Message = strings.ReplaceAll(e.Message, token, "[REDACTED]")
-	e.Code = strings.ReplaceAll(e.Code, token, "[REDACTED]")
-	for i := range e.Causes {
-		e.Causes[i] = strings.ReplaceAll(e.Causes[i], token, "[REDACTED]")
-	}
-	for i := range e.Remedies {
-		e.Remedies[i] = strings.ReplaceAll(e.Remedies[i], token, "[REDACTED]")
-	}
-	return e
+	return newAPIError(method, path, status, body, token)
 }
 
 // apiErrorBody is the shape Meshery Server writes (writeMeshkitError and
@@ -72,7 +60,7 @@ type apiErrorBody struct {
 	SuggestedRemediation []string `json:"suggestedRemediation"`
 }
 
-func newAPIError(method, path string, status int, body []byte) *APIError {
+func newAPIError(method, path string, status int, body []byte, token string) *APIError {
 	e := &APIError{
 		Status: status,
 		Method: method,
@@ -85,9 +73,21 @@ func newAPIError(method, path string, status int, body []byte) *APIError {
 		e.Code = parsed.Code
 		e.Causes = parsed.ProbableCause
 		e.Remedies = parsed.SuggestedRemediation
+	} else {
+		e.Message = truncate(redact(token, string(body)), 512)
 		return e
 	}
-	e.Message = truncate(strings.TrimSpace(string(body)), 512)
+	if token == "" {
+		return e
+	}
+	e.Message = strings.ReplaceAll(e.Message, token, "[REDACTED]")
+	e.Code = strings.ReplaceAll(e.Code, token, "[REDACTED]")
+	for i := range e.Causes {
+		e.Causes[i] = strings.ReplaceAll(e.Causes[i], token, "[REDACTED]")
+	}
+	for i := range e.Remedies {
+		e.Remedies[i] = strings.ReplaceAll(e.Remedies[i], token, "[REDACTED]")
+	}
 	return e
 }
 
