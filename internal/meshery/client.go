@@ -47,12 +47,20 @@ func WithKeychainScope(scope string) Option {
 
 // WithMaxConcurrentCalls bounds concurrent Cloud calls per tool (default 4).
 func WithMaxConcurrentCalls(limit int) Option {
-	return func(c *Client) { c.semaphore = NewSemaphore(limit) }
+	return func(c *Client) {
+		if limit >= 1 {
+			c.semaphore = NewSemaphore(limit)
+		}
+	}
 }
 
 // WithMaxRetries bounds 429/503 retries (default 3).
 func WithMaxRetries(n int) Option {
-	return func(c *Client) { c.maxRetries = n }
+	return func(c *Client) {
+		if n >= 0 {
+			c.maxRetries = n
+		}
+	}
 }
 
 // WithBackoff configures the 503/no-Retry-After backoff.
@@ -185,6 +193,12 @@ func (c *Client) Call(ctx context.Context, method, path string, body []byte, too
 // read-only wrappers and Ping may call without one because a Meshery Server
 // in local provider mode has no authentication.
 func (c *Client) call(ctx context.Context, method, path string, body []byte, tool string, requireToken bool) ([]byte, error) {
+	if deadline, ok := ctx.Deadline(); !ok || (c.http.Timeout > 0 && time.Until(deadline) > c.http.Timeout) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.http.Timeout)
+		defer cancel()
+	}
+
 	family := FamilyForRoute(method, path)
 
 	if err := c.semaphore.Acquire(ctx, tool); err != nil {
@@ -238,9 +252,15 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, too
 		case ClassReauth:
 			return nil, ErrReauth(fmt.Errorf("HTTP %d", resp.StatusCode))
 		case ClassInsufficientScope:
+			message := strings.TrimSpace(string(responseBody))
+			missingScope := class.MissingScope
+			if token != "" {
+				message = strings.ReplaceAll(message, token, "[REDACTED]")
+				missingScope = strings.ReplaceAll(missingScope, token, "[REDACTED]")
+			}
 			return nil, &ErrInsufficientScope{
-				MissingScope: class.MissingScope,
-				Underlying:   fmt.Errorf("HTTP %d %s", resp.StatusCode, strings.TrimSpace(string(responseBody))),
+				MissingScope: missingScope,
+				Underlying:   fmt.Errorf("HTTP %d %s", resp.StatusCode, message),
 			}
 		case ClassRateLimited:
 			if attempt == c.maxRetries {
@@ -266,7 +286,7 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, too
 			}
 			continue
 		default:
-			return nil, c.apiError(method, path, resp.StatusCode, responseBody)
+			return nil, c.apiError(method, path, resp.StatusCode, responseBody, token)
 		}
 	}
 	return nil, fmt.Errorf("cloud request failed: HTTP %d", lastStatus)
@@ -299,6 +319,12 @@ func (c *Client) sleep(ctx context.Context, retryAfter time.Duration, attempt in
 // unknown or already-revoked tokens also answer 200). 503 is retried with
 // backoff; 401 is the only re-auth signal.
 func (c *Client) Revoke(ctx context.Context) error {
+	if deadline, ok := ctx.Deadline(); !ok || (c.http.Timeout > 0 && time.Until(deadline) > c.http.Timeout) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.http.Timeout)
+		defer cancel()
+	}
+
 	token, _ := c.tokens.Get()
 	c.tokens.Delete() // evict before the request: regardless of the response
 
@@ -336,7 +362,7 @@ func (c *Client) Revoke(ctx context.Context) error {
 		case http.StatusServiceUnavailable:
 			if attempt == c.maxRetries {
 				return ErrServiceUnavailable(fmt.Errorf("revocation returned 503 after %d attempts: %s",
-					c.maxRetries+1, strings.TrimSpace(string(responseBody))))
+					c.maxRetries+1, redact(token, string(responseBody))))
 			}
 			if err := c.sleep(ctx, classRetryAfter(resp), attempt); err != nil {
 				return err
@@ -346,7 +372,7 @@ func (c *Client) Revoke(ctx context.Context) error {
 			return ErrReauth(fmt.Errorf("revocation returned 401"))
 		default:
 			return fmt.Errorf("revocation failed: HTTP %d %s", resp.StatusCode,
-				strings.TrimSpace(string(responseBody)))
+				redact(token, string(responseBody)))
 		}
 	}
 	return nil

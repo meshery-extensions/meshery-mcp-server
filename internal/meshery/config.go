@@ -1,11 +1,15 @@
 package meshery
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
+
+// maxRedirects matches the net/http default that CheckRedirect replaces.
+const maxRedirects = 10
 
 // AuthMode selects how the client authenticates.
 type AuthMode string
@@ -121,11 +125,22 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 		Timeout:   timeout,
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// Never carry credentials to another host.
-			if len(via) > 0 && req.URL.Host != via[0].URL.Host {
-				req.Header.Del("Cookie")
-				req.Header.Del("Authorization")
-				req.Header.Del(HeaderAPIToken)
+			// Setting CheckRedirect replaces the net/http default limit, so
+			// cap hops explicitly to stop self-redirecting endpoints looping
+			// until the request timeout.
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			// Never carry credentials to another host, and drop them on any
+			// https -> http downgrade in the chain (not just the first hop).
+			if len(via) > 0 {
+				previous := via[len(via)-1]
+				if req.URL.Host != via[0].URL.Host ||
+					(previous.URL.Scheme == "https" && req.URL.Scheme != "https") {
+					req.Header.Del("Cookie")
+					req.Header.Del("Authorization")
+					req.Header.Del(HeaderAPIToken)
+				}
 			}
 			return nil
 		},

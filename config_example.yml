@@ -18,20 +18,9 @@ meshery:
   # http://host.docker.internal:9081 to reach Meshery on the host.
   url: http://localhost:9081
 
-transport:
-  # How MCP clients reach the server.     Flag: --transport  Env: MESHERY_MCP_TRANSPORT
-  #   stdio  the AI app starts the server and talks over stdin/stdout
-  #   http   Streamable HTTP at http://<host>:<port>/mcp
-  mode: stdio
-
-  # http only. Must be a loopback address (127.0.0.1, ::1, localhost):
-  # remote access needs OAuth, which is not implemented yet. Clients must
-  # also send "Authorization: Bearer <key>", where the key is
-  # MESHERY_MCP_ACCESS_KEY (env only, at least 32 characters).
-  #                                       Flag: --host  Env: MESHERY_MCP_HOST
-  host: 127.0.0.1
-  #                                       Flag: --port  Env: MESHERY_MCP_PORT
-  port: 8080
+  # cookie (default) for Meshery Server, bearer for Meshery Cloud.
+  #                                       Env: MESHERY_AUTH_MODE
+  auth_mode: cookie
 
   # Narrowest keychain scope the deployment needs (Meshery Cloud only).
   # Empty (the default) requests no keychain scope: unscoped tokens behave
@@ -47,6 +36,21 @@ transport:
   # Overall timeout for each HTTP request.              Env: MESHERY_TIMEOUT
   # Accepts Go duration strings: 30s, 1m, 500ms.
   timeout: 30s
+
+transport:
+  # How MCP clients reach the server.     Flag: --transport  Env: MESHERY_MCP_TRANSPORT
+  #   stdio  the AI app starts the server and talks over stdin/stdout
+  #   http   Streamable HTTP at http://<host>:<port>/mcp
+  mode: stdio
+
+  # http only. Must be a loopback address (127.0.0.1, ::1, localhost):
+  # remote access needs OAuth, which is not implemented yet. Clients must
+  # also send "Authorization: Bearer <key>", where the key is
+  # MESHERY_MCP_ACCESS_KEY (env only, at least 32 characters).
+  #                                       Flag: --host  Env: MESHERY_MCP_HOST
+  host: 127.0.0.1
+  #                                       Flag: --port  Env: MESHERY_MCP_PORT
+  port: 8080
 
 log:
   # One of: debug, info, warn, error.     Env: LOG_LEVEL

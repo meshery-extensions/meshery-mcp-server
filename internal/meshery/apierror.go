@@ -45,12 +45,20 @@ func (e *APIError) Unwrap() error { return e.Kind }
 
 func (e *APIError) Is(target error) bool { return target != nil && target == e.Kind }
 
-// apiError builds an APIError and removes the stored token from any text the
-// server echoed back.
-func (c *Client) apiError(method, path string, status int, body []byte) *APIError {
+// apiError builds an APIError and removes the token captured for this request
+// from every server-supplied field retained in the error.
+func (c *Client) apiError(method, path string, status int, body []byte, token string) *APIError {
 	e := newAPIError(method, path, status, body)
-	if token, ok := c.tokens.Get(); ok && token != "" {
-		e.Message = strings.ReplaceAll(e.Message, token, "[REDACTED]")
+	if token == "" {
+		return e
+	}
+	e.Message = strings.ReplaceAll(e.Message, token, "[REDACTED]")
+	e.Code = strings.ReplaceAll(e.Code, token, "[REDACTED]")
+	for i := range e.Causes {
+		e.Causes[i] = strings.ReplaceAll(e.Causes[i], token, "[REDACTED]")
+	}
+	for i := range e.Remedies {
+		e.Remedies[i] = strings.ReplaceAll(e.Remedies[i], token, "[REDACTED]")
 	}
 	return e
 }
@@ -111,4 +119,13 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// redact removes a credential from server text before it is put in an error.
+func redact(token, text string) string {
+	text = strings.TrimSpace(text)
+	if token == "" {
+		return text
+	}
+	return strings.ReplaceAll(text, token, "[REDACTED]")
 }

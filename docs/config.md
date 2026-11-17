@@ -7,6 +7,7 @@ meshery-mcp-server reads its configuration once, at startup. To change a setting
 | Setting | Flag | Environment variable | Config file key | Default | Accepted values |
 |---|---|---|---|---|---|
 | Meshery server URL | | `MESHERY_SERVER_URL` | `meshery.url` | `http://localhost:9081` | An `http://` or `https://` URL with a host |
+| Authentication mode | | `MESHERY_AUTH_MODE` | `meshery.auth_mode` | `cookie` | `cookie` (Meshery Server), `bearer` (Meshery Cloud), case-insensitive |
 | Keychain scope | | `MESHERY_KEYCHAIN_SCOPE` | `meshery.keychain_scope` | *(none)* | Comma-separated keychain ids/names; empty = unscoped token |
 | Max concurrent Cloud calls per tool | | `MESHERY_MAX_CONCURRENT_CALLS` | `meshery.max_concurrent_calls` | `4` | Integer >= 1 |
 | Max Cloud retries per call | | `MESHERY_MAX_RETRIES` | `meshery.max_retries` | `3` | Integer >= 0 |
@@ -93,16 +94,16 @@ The token is a credential. The server never prints it: it is redacted as `[REDAC
 
 ## How the token is sent
 
-Meshery Server and Meshery Cloud authenticate differently, and the client sends only what the target accepts:
+Meshery Server and Meshery Cloud authenticate differently. `MESHERY_AUTH_MODE` / `meshery.auth_mode` selects which one the client talks to; the default is `cookie`:
 
-- **Meshery Server** (the default `MESHERY_SERVER_URL`) reads a cookie named `token`, not an `Authorization` header and not a `token` request header. The client sends `Cookie: token=<MESHERY_API_TOKEN>` and, when configured, `meshery-provider=<name>`. This comes from the server's `RemoteProvider.GetToken` (`server/models/remote_auth.go`). A local provider deployment needs no token.
-- **Meshery Cloud** reads `Authorization: Bearer <token>`. The existing `Call` and `Revoke` methods keep that behavior; pass `meshery.AuthBearer` when constructing a client for Cloud.
+- **Meshery Server** (`cookie`, the default): the server reads a cookie named `token`, not an `Authorization` header and not a `token` request header. The client sends `Cookie: token=<MESHERY_API_TOKEN>` and, when configured, `meshery-provider=<name>`. This comes from the server's `RemoteProvider.GetToken` (`server/models/remote_auth.go`). A local provider deployment needs no token.
+- **Meshery Cloud** (`bearer`): Cloud reads `Authorization: Bearer <token>`. Set `MESHERY_AUTH_MODE=bearer` together with a Cloud `MESHERY_SERVER_URL`; the binary then builds the client with the Cloud auth mode.
 
-`GET /api/system/version` is unauthenticated, so the startup health check never sends credentials. Tokens are redacted from errors and logs, and credentials are dropped when a redirect crosses hosts.
+`GET /api/system/version` is unauthenticated, so the startup health check never sends credentials. Tokens are redacted from errors and logs. Credentials are dropped when a redirect crosses hosts or downgrades from HTTPS to HTTP, and redirects are capped at 10 hops so a self-redirecting endpoint cannot loop until the request timeout.
 
 ## Cloud API-token behavior
 
-When `MESHERY_SERVER_URL` points at Meshery Cloud, the client behaves as follows:
+When `MESHERY_AUTH_MODE=bearer` and `MESHERY_SERVER_URL` points at Meshery Cloud, the client behaves as follows:
 
 **Keychain-scoped tokens (#6369).** `meshery.keychain_scope` / `MESHERY_KEYCHAIN_SCOPE` requests the narrowest
 keychain scope the deployment needs; it defaults to empty, which means no
@@ -314,6 +315,10 @@ Configuration problems and HTTP listen failures stop the server at startup; a sl
 | `meshery-mcp-server-1021` | HTTP access key is required | `RunHTTP` was called without an access key (config validation normally catches this first) | Set `MESHERY_MCP_ACCESS_KEY` |
 | `meshery-mcp-server-1022` | HTTP server did not shut down cleanly | Requests were still running when the 5-second shutdown timeout ended | None needed; remaining connections were closed |
 | `meshery-mcp-server-1023` | Invalid log format | `LOG_FORMAT` / `log.format` is not a supported format | Use `text` or `json` |
+| `meshery-mcp-server-1024` | Invalid max concurrent calls | `MESHERY_MAX_CONCURRENT_CALLS` / `meshery.max_concurrent_calls` is below 1 | Set it to an integer >= 1 |
+| `meshery-mcp-server-1025` | Invalid max retries | `MESHERY_MAX_RETRIES` / `meshery.max_retries` is negative | Set it to an integer >= 0 |
+| `meshery-mcp-server-1026` | Invalid request timeout | `MESHERY_TIMEOUT` / `meshery.timeout` is zero or negative | Set it to a positive duration such as `30s` |
+| `meshery-mcp-server-1027` | Invalid Meshery auth mode | `MESHERY_AUTH_MODE` / `meshery.auth_mode` is neither `cookie` nor `bearer` | Set it to `cookie` for Meshery Server or `bearer` for Meshery Cloud |
 
 Logs and error messages never include the token, the access key, or any password embedded in the URL: the startup line logs the URL with the password replaced by `xxxxx`.
 

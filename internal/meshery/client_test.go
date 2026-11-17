@@ -152,6 +152,55 @@ func TestCall403UnidentifiedScope(t *testing.T) {
 	}
 }
 
+func TestCall403RedactsTokenFromBodyAndScope(t *testing.T) {
+	srv, _ := newMockCloud(t, scenario{status: 403,
+		body: `{"missing_scope":"scope-for-secret-token","error":"denied for secret-token"}`})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "secret-token")
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/ledgers", nil, "tool-a")
+	var insufficient *ErrInsufficientScope
+	if !errors.As(err, &insufficient) {
+		t.Fatalf("expected ErrInsufficientScope, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Errorf("403 error leaked the token: %v", err)
+	}
+	if !strings.Contains(insufficient.MissingScope, "[REDACTED]") {
+		t.Errorf("missing scope was not redacted: %q", insufficient.MissingScope)
+	}
+}
+
+func TestAPIErrorRedactsEveryRetainedField(t *testing.T) {
+	srv, _ := newMockCloud(t, scenario{status: 400, body: `{
+		"error":"bad secret-token",
+		"code":"code-secret-token",
+		"probableCause":["cause secret-token"],
+		"suggestedRemediation":["fix secret-token"]
+	}`})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "secret-token")
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/ledgers", nil, "tool-a")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %v", err)
+	}
+	for name, field := range map[string]string{
+		"Message": apiErr.Message, "Code": apiErr.Code,
+		"Causes": strings.Join(apiErr.Causes, ","), "Remedies": strings.Join(apiErr.Remedies, ","),
+	} {
+		if strings.Contains(field, "secret-token") {
+			t.Errorf("%s leaked the token: %q", name, field)
+		}
+	}
+	if !strings.Contains(apiErr.Message, "[REDACTED]") || !strings.Contains(apiErr.Code, "[REDACTED]") ||
+		!strings.Contains(strings.Join(apiErr.Causes, ","), "[REDACTED]") ||
+		!strings.Contains(strings.Join(apiErr.Remedies, ","), "[REDACTED]") {
+		t.Errorf("expected redactions in all fields, got %+v", apiErr)
+	}
+}
+
 func TestCall429HonorsRetryAfter(t *testing.T) {
 	srv, mock := newMockCloud(t,
 		scenario{status: 429, retryAfter: "1"},
@@ -240,6 +289,28 @@ func TestCall429RespectsContext(t *testing.T) {
 	}
 	if err != context.DeadlineExceeded && !strings.Contains(err.Error(), "context deadline exceeded") {
 		t.Errorf("expected context error, got %v", err)
+	}
+}
+
+func TestCallTimeoutBoundsRetryAfter(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 503, retryAfter: "86400"})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token", WithTimeout(200*time.Millisecond))
+	start := time.Now()
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/events", nil, "tool-a")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected the retry sleep to be cut short by the configured timeout")
+	}
+	if !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Errorf("expected a deadline error, got %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("elapsed %v, expected the 24h Retry-After to be bounded by the timeout", elapsed)
+	}
+	if mock.count("/api/events") != 1 {
+		t.Errorf("Cloud called %d times, want 1 (no retry after deadline)", mock.count("/api/events"))
 	}
 }
 

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -278,8 +279,8 @@ func TestCreateDesign(t *testing.T) {
 	if result.Name != "my-design" {
 		t.Errorf("expected design name my-design, got %s", result.Name)
 	}
-	if mock.count("/api/content/patterns") != 1 {
-		t.Errorf("expected 1 call to /api/content/patterns, got %d", mock.count("/api/content/patterns"))
+	if mock.count("/api/pattern") != 1 {
+		t.Errorf("expected 1 call to /api/pattern, got %d", mock.count("/api/pattern"))
 	}
 }
 
@@ -314,8 +315,8 @@ func TestCreateDesignMissingConfirm(t *testing.T) {
 	if !strings.Contains(err.Error(), "confirm: true") {
 		t.Errorf("expected confirm message, got %v", err)
 	}
-	if mock.count("/api/content/patterns") != 0 {
-		t.Errorf("expected 0 calls to /api/content/patterns without confirm, got %d", mock.count("/api/content/patterns"))
+	if mock.count("/api/pattern") != 0 {
+		t.Errorf("expected 0 calls to /api/pattern without confirm, got %d", mock.count("/api/pattern"))
 	}
 }
 
@@ -502,8 +503,8 @@ func TestDeleteDesign(t *testing.T) {
 	if !strings.Contains(err.Error(), "confirm: true") {
 		t.Errorf("expected confirm message, got %v", err)
 	}
-	if mock.count("/api/content/patterns/d1") != 0 {
-		t.Errorf("expected 0 calls to /api/content/patterns/d1 without confirm, got %d", mock.count("/api/content/patterns/d1"))
+	if mock.count("/api/pattern/d1") != 0 {
+		t.Errorf("expected 0 calls to /api/pattern/d1 without confirm, got %d", mock.count("/api/pattern/d1"))
 	}
 
 	// With confirm, should make the API call
@@ -519,7 +520,34 @@ func TestDeleteDesign(t *testing.T) {
 	if result.ID != "d1" {
 		t.Errorf("expected design ID d1, got %s", result.ID)
 	}
-	if mock.count("/api/content/patterns/d1") != 1 {
-		t.Errorf("expected 1 call to /api/content/patterns/d1, got %d", mock.count("/api/content/patterns/d1"))
+	if mock.count("/api/pattern/d1") != 1 {
+		t.Errorf("expected 1 call to /api/pattern/d1, got %d", mock.count("/api/pattern/d1"))
+	}
+}
+
+func TestCreateDesignBody(t *testing.T) {
+	body, err := createDesignBody("my-design", "name: doc\nschemaVersion: v1beta3\ncomponents: []\n")
+	if err != nil {
+		t.Fatalf("createDesignBody failed: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("body is not JSON: %v", err)
+	}
+	if got["name"] != "my-design" {
+		t.Errorf("name = %v, want my-design", got["name"])
+	}
+	designFile, ok := got["designFile"].(map[string]any)
+	if !ok {
+		t.Fatalf("designFile must be an object for Meshery Server, got %T", got["designFile"])
+	}
+	if designFile["name"] != "doc" {
+		t.Errorf("designFile.name = %v, want doc", designFile["name"])
+	}
+}
+
+func TestCreateDesignBodyRejectsNonObject(t *testing.T) {
+	if _, err := createDesignBody("x", "just a string"); err == nil {
+		t.Fatal("expected a design_yaml object error")
 	}
 }

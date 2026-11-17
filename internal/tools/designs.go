@@ -9,9 +9,10 @@ import (
 	"net/url"
 
 	"github.com/meshery-extensions/meshery-mcp-server/internal/meshery"
+	"gopkg.in/yaml.v3"
 )
 
-// NewDesignTools returns the design Cloud API tools: list, get, create,
+// NewDesignTools returns the Meshery Server design tools: list, get, create,
 // deploy, undeploy, and delete designs.
 func NewDesignTools(client *meshery.Client) []Tool {
 	return []Tool{
@@ -83,7 +84,7 @@ func NewDesignTools(client *meshery.Client) []Tool {
 		},
 		{
 			Name:        "get_design",
-			Description: "Get design details by ID from Meshery Cloud.",
+			Description: "Get design details by ID from Meshery Server.",
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"design_id"},
@@ -131,6 +132,11 @@ func NewDesignTools(client *meshery.Client) []Tool {
 						"minLength":   1,
 						"maxLength":   1000000, // 1 MB max
 					},
+					"confirm": map[string]any{
+						"type":        "boolean",
+						"description": "Must be true to confirm creation.",
+						"default":     false,
+					},
 				},
 			},
 			Handler: func(ctx context.Context, args any) (any, error) {
@@ -154,17 +160,12 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					}, fmt.Errorf("create_design would create design %q. Set confirm: true to proceed", name)
 				}
 
-				body, err := json.Marshal(map[string]any{
-					"patternData": map[string]any{
-						"patternFile": designYAML,
-					},
-					"name": name,
-				})
+				body, err := createDesignBody(name, designYAML)
 				if err != nil {
-					return nil, fmt.Errorf("marshaling create_design request: %w", err)
+					return nil, err
 				}
 
-				resp, err := client.Call(ctx, http.MethodPost, "/api/content/patterns", body, "create_design")
+				resp, err := client.Call(ctx, http.MethodPost, "/api/pattern", body, "create_design")
 				if err != nil {
 					return nil, err
 				}
@@ -377,7 +378,7 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					}, fmt.Errorf("delete_design would delete design %q. Set confirm: true to proceed", designID)
 				}
 
-				_, err := client.Call(ctx, http.MethodDelete, "/api/content/patterns/"+url.PathEscape(designID), nil, "delete_design")
+				_, err := client.Call(ctx, http.MethodDelete, "/api/pattern/"+url.PathEscape(designID), nil, "delete_design")
 				if err != nil {
 					return nil, err
 				}
@@ -389,6 +390,24 @@ func NewDesignTools(client *meshery.Client) []Tool {
 			},
 		},
 	}
+}
+
+// createDesignBody builds the POST /api/pattern payload. Meshery Server decodes
+// designFile into a structured design.PatternFile, so YAML/JSON text from the
+// tool is parsed into an object rather than sent as a JSON string.
+func createDesignBody(name, designYAML string) ([]byte, error) {
+	var content any
+	if err := yaml.Unmarshal([]byte(designYAML), &content); err != nil {
+		return nil, fmt.Errorf("parsing design_yaml: %w", err)
+	}
+	if _, ok := content.(map[string]any); !ok {
+		return nil, fmt.Errorf("design_yaml must be a YAML or JSON object")
+	}
+	body, err := json.Marshal(map[string]any{"name": name, "designFile": content})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling create_design request: %w", err)
+	}
+	return body, nil
 }
 
 // decodeArgs decodes a map[string]any into the target pointer. The MCP server
@@ -468,7 +487,7 @@ type DeleteDesignResult struct {
 	Name string `json:"name"`
 }
 
-// getDesignByID fetches a design by ID from Meshery Cloud.
+// getDesignByID fetches a design by ID from Meshery Server.
 func getDesignByID(ctx context.Context, client *meshery.Client, designID string) (DesignDetail, error) {
 	design, err := client.GetDesign(ctx, designID)
 	if err != nil {
@@ -483,6 +502,8 @@ func designDetail(design meshery.Design) DesignDetail {
 		Name:        design.Name,
 		PatternFile: patternFileString(design.PatternFile),
 		Visibility:  design.Visibility,
+		CreatedAt:   design.CreatedAt,
+		UpdatedAt:   design.UpdatedAt,
 	}
 }
 

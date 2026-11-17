@@ -152,3 +152,13 @@ func ErrInvalidTimeout(value time.Duration) error {
 		[]string{"MESHERY_TIMEOUT / meshery.timeout is zero or negative"},
 		[]string{"Set it to a positive duration such as 30s or 1m"})
 }
+
+// ErrInvalidAuthMode is returned when the configured Meshery auth mode is
+// neither cookie (Meshery Server) nor bearer (Meshery Cloud).
+func ErrInvalidAuthMode(mode string) error {
+	return errors.New("meshery-mcp-server-1027", errors.Alert,
+		[]string{"Invalid Meshery auth mode"},
+		[]string{fmt.Sprintf("auth mode %q is not supported", mode)},
+		[]string{"MESHERY_AUTH_MODE / meshery.auth_mode has a typo"},
+		[]string{"Set it to cookie for Meshery Server or bearer for Meshery Cloud"})
+}

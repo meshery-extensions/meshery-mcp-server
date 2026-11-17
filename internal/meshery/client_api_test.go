@@ -186,6 +186,49 @@ func TestPingContextCancellation(t *testing.T) {
 	}
 }
 
+func TestSelfRedirectIsCapped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/loop", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "secret-token", WithAuthMode(AuthCookie))
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/claims", nil, "tool")
+	if err == nil {
+		t.Fatal("expected a redirect-loop error")
+	}
+	if !strings.Contains(err.Error(), "stopped after 10 redirects") {
+		t.Errorf("expected the redirect cap to fire, got %v", err)
+	}
+}
+
+func TestSchemeDowngradeDropsCredentials(t *testing.T) {
+	c := NewClient("https://meshery.example", "secret-token", WithAuthMode(AuthCookie))
+	check := c.http.CheckRedirect
+	previous, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://meshery.example/api/claims", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	redirect, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://meshery.example/api/claims", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.applyAuth(previous, "secret-token")
+	c.applyAuth(redirect, "secret-token")
+	if err := check(redirect, []*http.Request{previous}); err != nil {
+		t.Fatal(err)
+	}
+	if got := redirect.Header.Get("Cookie"); got != "" {
+		t.Errorf("cookie survived scheme downgrade: %q", got)
+	}
+	if got := redirect.Header.Get("Authorization"); got != "" {
+		t.Errorf("authorization survived scheme downgrade: %q", got)
+	}
+	if got := redirect.Header.Get(HeaderAPIToken); got != "" {
+		t.Errorf("api token header survived scheme downgrade: %q", got)
+	}
+}
+
 func TestPingErrorMapping(t *testing.T) {
 	tests := []struct {
 		name string

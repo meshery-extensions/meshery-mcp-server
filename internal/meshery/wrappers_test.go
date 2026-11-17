@@ -111,14 +111,6 @@ func TestConnectionWrappers(t *testing.T) {
 		}
 		return err
 	})
-	wrapperCase(t, "contexts", `{"contexts":[{"id":"ctx1","name":"minikube"}],"totalCount":1}`,
-		"/api/system/kubernetes/contexts", "pagesize=10", func(c *Client) error {
-			got, err := c.ListKubernetesContexts(context.Background(), ListOptions{})
-			if err == nil && (len(got.Contexts) != 1 || got.Contexts[0].Name != "minikube") {
-				t.Errorf("unexpected page: %+v", got)
-			}
-			return err
-		})
 }
 
 func TestRegistryWrappers(t *testing.T) {

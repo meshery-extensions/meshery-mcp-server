@@ -68,7 +68,7 @@ Run the image over stdio:
 ```sh
 docker run -i --rm \
   --add-host=host.docker.internal:host-gateway \
-  -e MESHERY_SERVER_URL=http://localhost:9081 \
+  -e MESHERY_SERVER_URL=http://host.docker.internal:9081 \
   -e MESHERY_API_TOKEN \
   ghcr.io/meshery-extensions/meshery-mcp-server:v0.1.0
 ```

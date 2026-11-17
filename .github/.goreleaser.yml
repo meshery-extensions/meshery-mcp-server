@@ -62,7 +62,13 @@ dockers:
     - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     - "--label=org.opencontainers.image.title={{ .ProjectName }}"
 docker_signs:
-- artifacts: all
+- cmd: cosign
+  artifacts: all
+  # Keyless OIDC signing: no --key so cosign does not look for cosign.key.
+  args:
+  - sign
+  - --yes
+  - ${artifact}
 
 release:
   name_template: "Meshery MCP Server {{.Tag}}"

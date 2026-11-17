@@ -13,8 +13,8 @@ type Design struct {
 	Name        string          `json:"name,omitempty"`
 	PatternFile json.RawMessage `json:"patternFile,omitempty"`
 	Visibility  string          `json:"visibility,omitempty"`
-	CreatedAt   string          `json:"created_at,omitempty"`
-	UpdatedAt   string          `json:"updated_at,omitempty"`
+	CreatedAt   string          `json:"createdAt,omitempty"`
+	UpdatedAt   string          `json:"updatedAt,omitempty"`
 }
 
 // DesignPage is the GET /api/pattern envelope.

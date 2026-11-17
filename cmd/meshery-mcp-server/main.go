@@ -83,7 +83,7 @@ func run(boot logger.Handler) (logger.Handler, error) {
 		MaxRetries:         cfg.Meshery.MaxRetries,
 		MaxConcurrentCalls: cfg.Meshery.MaxConcurrentCalls,
 		KeychainScope:      cfg.Meshery.KeychainScope,
-		AuthMode:           meshery.AuthCookie,
+		AuthMode:           meshery.AuthMode(cfg.Meshery.AuthMode),
 	})
 	if err != nil {
 		return boot, err

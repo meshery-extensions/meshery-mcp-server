@@ -69,7 +69,7 @@ func (c *Client) Ping(ctx context.Context) (VersionInfo, error) {
 		return VersionInfo{}, &ConnectError{URL: c.baseURL, Kind: classifyConnect(err), Err: err}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return VersionInfo{}, c.apiError(http.MethodGet, path, resp.StatusCode, body)
+		return VersionInfo{}, c.apiError(http.MethodGet, path, resp.StatusCode, body, "")
 	}
 
 	var info VersionInfo
