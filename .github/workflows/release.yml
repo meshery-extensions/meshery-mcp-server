@@ -6,11 +6,12 @@ name: Release
 #   1. As PRs merge to master, workflows/release-drafter.yml keeps a draft release
 #      named "Meshery MCP Server vX.Y.Z" up to date. The version is resolved from
 #      PR labels (see version-resolver in .github/release-drafter.yml).
-#   2. A maintainer pushes the tag shown on that draft, e.g. `git tag v0.1.0 && git push upstream v0.1.0`.
+#   2. A maintainer pushes the tag shown on that draft, e.g. `git tag v0.1.0 && git push origin v0.1.0`.
 #   3. This workflow runs GoReleaser, which attaches the binaries to the existing
 #      draft (release.use_existing_draft in .github/.goreleaser.yml) and publishes it.
 #
-# The tag must match the draft's version; otherwise GoReleaser creates a separate release.
+# The tag must match the draft's version; otherwise GoReleaser creates a separate
+# release.
 
 on:
   push:
@@ -20,6 +21,8 @@ on:
 
 permissions:
   contents: write
+  packages: write
+  id-token: write
 
 jobs:
   goreleaser:
@@ -28,18 +31,27 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27'
+      - name: Log in to GHCR
+        uses: docker/login-action@v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.3
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@v7.3.0
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: ~> v2
           args: release --clean -f .github/.goreleaser.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_EXPERIMENTAL: 1

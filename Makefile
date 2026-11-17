@@ -32,6 +32,12 @@ lint:
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint not found: https://golangci-lint.run/welcome/install/"; exit 1; }
 	golangci-lint run ./...
 
+.PHONY: docs-lint
+## Lint Markdown files.
+docs-lint:
+	@command -v markdownlint >/dev/null || { echo "markdownlint not found: npm install -g markdownlint-cli"; exit 1; }
+	markdownlint README.md docs/
+
 .PHONY: test
 ## Run unit tests.
 test:

@@ -3,7 +3,7 @@ updates:
 - package-ecosystem: gomod
   directory: "/"
   schedule:
-    interval: monthly
+    interval: weekly
   open-pull-requests-limit: 5
   labels:
   - pr/dependencies
@@ -12,7 +12,16 @@ updates:
 - package-ecosystem: github-actions
   directory: "/"
   schedule:
-    interval: monthly
+    interval: weekly
+  open-pull-requests-limit: 5
+  labels:
+  - pr/dependencies
+  - kind/chore
+  - area/ci
+- package-ecosystem: docker
+  directory: "/"
+  schedule:
+    interval: weekly
   open-pull-requests-limit: 5
   labels:
   - pr/dependencies
