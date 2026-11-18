@@ -291,6 +291,31 @@ func TestTools_Call(t *testing.T) {
 	}
 }
 
+func TestTools_PendingConfirmationIsStructuredResult(t *testing.T) {
+	// The client URL is unreachable: a confirmation gate must not make a
+	// Meshery request.
+	r := &designRegistry{
+		fakeRegistry: &fakeRegistry{},
+		client:       meshery.NewClient("http://127.0.0.1:1", "test-token"),
+	}
+	cs := connect(t, r, protocolVersions[0])
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "deploy_design",
+		Arguments: map[string]any{"design_id": "d1", "cluster_id": "c1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("pending confirmation should be a structured result, got error: %+v", res.Content)
+	}
+	got, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(got), "pending_confirmation") {
+		t.Errorf("structured content = %s, want pending_confirmation", got)
+	}
+}
+
 func TestFromRegistry(t *testing.T) {
 	wrap := func(err error) error { return ErrListModels(err) }
 

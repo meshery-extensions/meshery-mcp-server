@@ -154,10 +154,10 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					return nil, fmt.Errorf("design_yaml is required")
 				}
 				if !confirm {
-					return CreateDesignResult{
-						ID:   "",
-						Name: name,
-					}, fmt.Errorf("create_design would create design %q. Set confirm: true to proceed", name)
+					return nil, &confirmationNeeded{
+						result: CreateDesignResult{ID: "", Name: name},
+						reason: fmt.Sprintf("create_design would create design %q. Set confirm: true to proceed", name),
+					}
 				}
 
 				body, err := createDesignBody(name, designYAML)
@@ -170,17 +170,20 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					return nil, err
 				}
 
-				var created struct {
+				var created []struct {
 					ID   string `json:"id"`
 					Name string `json:"name"`
 				}
 				if err := json.Unmarshal(resp, &created); err != nil {
 					return nil, fmt.Errorf("decoding create design response: %w", err)
 				}
+				if len(created) != 1 || created[0].ID == "" {
+					return nil, fmt.Errorf("create design response did not contain exactly one saved design with an ID")
+				}
 
 				return CreateDesignResult{
-					ID:   created.ID,
-					Name: created.Name,
+					ID:   created[0].ID,
+					Name: created[0].Name,
 				}, nil
 			},
 		},
@@ -223,11 +226,14 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					return nil, fmt.Errorf("cluster_id is required")
 				}
 				if !confirm {
-					return DeployDesignResult{
-						DesignID:  designID,
-						ClusterID: clusterID,
-						Status:    "pending_confirmation",
-					}, fmt.Errorf("deploy_design would deploy design %q to cluster %q. Set confirm: true to proceed", designID, clusterID)
+					return nil, &confirmationNeeded{
+						result: DeployDesignResult{
+							DesignID:  designID,
+							ClusterID: clusterID,
+							Status:    "pending_confirmation",
+						},
+						reason: fmt.Sprintf("deploy_design would deploy design %q to cluster %q. Set confirm: true to proceed", designID, clusterID),
+					}
 				}
 
 				// First, get the design to obtain its patternFile
@@ -252,18 +258,19 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					return nil, err
 				}
 
-				var deployResp struct {
-					ID   string `json:"id"`
-					Name string `json:"name"`
+				failed, ok, err := componentFailures(resp)
+				if err != nil {
+					return nil, err
 				}
-				if err := json.Unmarshal(resp, &deployResp); err != nil {
-					return nil, fmt.Errorf("decoding deploy response: %w", err)
+				status := "deployed"
+				if !ok {
+					status = "failed"
 				}
-
 				return DeployDesignResult{
 					DesignID:  designID,
 					ClusterID: clusterID,
-					Status:    "deployed",
+					Status:    status,
+					Failed:    failed,
 				}, nil
 			},
 		},
@@ -300,11 +307,14 @@ func NewDesignTools(client *meshery.Client) []Tool {
 				clusterID, _ := params["cluster_id"].(string)
 				confirm, _ := params["confirm"].(bool)
 				if !confirm {
-					return UndeployDesignResult{
-						DesignID:  designID,
-						ClusterID: clusterID,
-						Status:    "pending_confirmation",
-					}, fmt.Errorf("undeploy_design would undeploy design %q from cluster %q. Set confirm: true to proceed", designID, clusterID)
+					return nil, &confirmationNeeded{
+						result: UndeployDesignResult{
+							DesignID:  designID,
+							ClusterID: clusterID,
+							Status:    "pending_confirmation",
+						},
+						reason: fmt.Sprintf("undeploy_design would undeploy design %q from cluster %q. Set confirm: true to proceed", designID, clusterID),
+					}
 				}
 				if designID == "" {
 					return nil, fmt.Errorf("design_id is required")
@@ -330,15 +340,23 @@ func NewDesignTools(client *meshery.Client) []Tool {
 				q := url.Values{}
 				q.Add("contexts", clusterID)
 
-				_, err = client.CallServer(ctx, http.MethodDelete, "/api/pattern/deploy?"+q.Encode(), undeployBody, "undeploy_design")
+				resp, err := client.CallServer(ctx, http.MethodDelete, "/api/pattern/deploy?"+q.Encode(), undeployBody, "undeploy_design")
 				if err != nil {
 					return nil, err
 				}
-
+				failed, ok, err := componentFailures(resp)
+				if err != nil {
+					return nil, err
+				}
+				status := "undeployed"
+				if !ok {
+					status = "failed"
+				}
 				return UndeployDesignResult{
 					DesignID:  designID,
 					ClusterID: clusterID,
-					Status:    "undeployed",
+					Status:    status,
+					Failed:    failed,
 				}, nil
 			},
 		},
@@ -372,10 +390,10 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					return nil, fmt.Errorf("design_id is required")
 				}
 				if !confirm {
-					return DeleteDesignResult{
-						ID:   designID,
-						Name: designID,
-					}, fmt.Errorf("delete_design would delete design %q. Set confirm: true to proceed", designID)
+					return nil, &confirmationNeeded{
+						result: DeleteDesignResult{ID: designID, Name: designID},
+						reason: fmt.Sprintf("delete_design would delete design %q. Set confirm: true to proceed", designID),
+					}
 				}
 
 				_, err := client.CallServer(ctx, http.MethodDelete, "/api/pattern/"+url.PathEscape(designID), nil, "delete_design")
@@ -478,16 +496,66 @@ type CreateDesignResult struct {
 	Name string `json:"name"`
 }
 
+type ComponentOutcome struct {
+	Component string `json:"component"`
+	Kind      string `json:"kind,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
 type DeployDesignResult struct {
-	DesignID  string `json:"design_id"`
-	ClusterID string `json:"cluster_id"`
-	Status    string `json:"status"`
+	DesignID  string             `json:"design_id"`
+	ClusterID string             `json:"cluster_id"`
+	Status    string             `json:"status"`
+	Failed    []ComponentOutcome `json:"failed,omitempty"`
 }
 
 type UndeployDesignResult struct {
-	DesignID  string `json:"design_id"`
-	ClusterID string `json:"cluster_id"`
-	Status    string `json:"status"`
+	DesignID  string             `json:"design_id"`
+	ClusterID string             `json:"cluster_id"`
+	Status    string             `json:"status"`
+	Failed    []ComponentOutcome `json:"failed,omitempty"`
+}
+
+// componentFailures decodes the pattern handler's per-component response. The
+// handler returns component ID to per-context summaries; prerequisite entries
+// are fail-forward, so only non-prerequisite entries decide the outcome.
+func componentFailures(resp []byte) (failed []ComponentOutcome, allSucceeded bool, err error) {
+	var byComponent map[string][]struct {
+		Summary []struct {
+			Kind           string
+			Model          string
+			CompName       string
+			Success        bool
+			Message        string
+			IsPrerequisite bool
+		}
+		SystemName string
+		Location   string
+	}
+	if err := json.Unmarshal(resp, &byComponent); err != nil {
+		return nil, false, fmt.Errorf("decoding deployment outcomes: %w", err)
+	}
+	total := 0
+	for _, contexts := range byComponent {
+		for _, ctx := range contexts {
+			for _, c := range ctx.Summary {
+				if c.IsPrerequisite {
+					continue
+				}
+				total++
+				if !c.Success {
+					failed = append(failed, ComponentOutcome{
+						Component: c.CompName,
+						Kind:      c.Kind,
+						Model:     c.Model,
+						Message:   c.Message,
+					})
+				}
+			}
+		}
+	}
+	return failed, total > 0 && len(failed) == 0, nil
 }
 
 type DeleteDesignResult struct {

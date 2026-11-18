@@ -207,7 +207,7 @@ func TestAPIErrorRedactsFallbackBeforeTruncation(t *testing.T) {
 		token  string
 		prefix string
 	}{
-		{name: "token crosses limit", token: "secret-token", prefix: strings.Repeat("x", 500)},
+		{name: "token crosses limit", token: "secret-token", prefix: strings.Repeat("x", 501)},
 		{name: "token exceeds limit", token: strings.Repeat("secret", 100)},
 		{name: "replacement contains token", token: "REDACTED"},
 	} {
@@ -222,6 +222,41 @@ func TestAPIErrorRedactsFallbackBeforeTruncation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCallServerTokenResolution(t *testing.T) {
+	t.Run("after revoke sends no startup token", func(t *testing.T) {
+		srv, mock := newMockCloud(t, scenario{status: 200, body: ""})
+		defer srv.Close()
+
+		c := NewClient(srv.URL, "startup")
+		if err := c.Revoke(context.Background()); err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		ctx := WithToken(context.Background(), "startup")
+		_, err := c.CallServer(ctx, http.MethodPost, "/api/pattern", nil, "tool")
+		if err == nil || !strings.Contains(err.Error(), "No API token configured") {
+			t.Fatalf("want ErrNoToken, got %v", err)
+		}
+		if mock.count("/api/pattern") != 0 {
+			t.Errorf("pattern calls = %d, want 0", mock.count("/api/pattern"))
+		}
+	})
+
+	t.Run("after rotation sends new token", func(t *testing.T) {
+		srv, mock := newMockCloud(t, scenario{status: 200, body: `{"ok":true}`})
+		defer srv.Close()
+
+		c := NewClient(srv.URL, "startup")
+		c.SetToken("rotated")
+		ctx := WithToken(context.Background(), "startup")
+		if _, err := c.CallServer(ctx, http.MethodPost, "/api/pattern", nil, "tool"); err != nil {
+			t.Fatalf("CallServer: %v", err)
+		}
+		if got := mock.lastAuth("/api/pattern"); got != "Bearer rotated" {
+			t.Errorf("Authorization = %q, want %q", got, "Bearer rotated")
+		}
+	})
 }
 
 func TestCall429HonorsRetryAfter(t *testing.T) {

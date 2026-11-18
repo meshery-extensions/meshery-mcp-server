@@ -124,23 +124,25 @@ type Client struct {
 	authMode      AuthMode
 	provider      string
 	userAgent     string
+	startupToken  string // token supplied at construction; context copies of it are inherited, not independent credentials
 }
 
 // NewClient builds a Cloud client for baseURL using token. The token is
 // held in a memory store; Revoke empties it (and any other store wired in).
 func NewClient(baseURL string, token string, opts ...Option) *Client {
 	c := &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		http:       newHTTPClient(30 * time.Second),
-		tokens:     &MemoryStore{},
-		limiter:    NewLimiter(),
-		semaphore:  NewSemaphore(4),
-		maxRetries: 3,
-		backoff:    Backoff{Base: DefaultBaseBackoff, Cap: DefaultCapBackoff},
-		authHeader: "Authorization",
-		authValue:  func(token string) string { return "Bearer " + token },
-		authMode:   AuthBearer,
-		userAgent:  defaultUserAgent,
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		http:         newHTTPClient(30 * time.Second),
+		tokens:       &MemoryStore{},
+		limiter:      NewLimiter(),
+		semaphore:    NewSemaphore(4),
+		maxRetries:   3,
+		backoff:      Backoff{Base: DefaultBaseBackoff, Cap: DefaultCapBackoff},
+		authHeader:   "Authorization",
+		authValue:    func(token string) string { return "Bearer " + token },
+		authMode:     AuthBearer,
+		userAgent:    defaultUserAgent,
+		startupToken: token,
 	}
 	c.tokens.Set(token)
 	for _, o := range opts {
@@ -196,6 +198,24 @@ func (c *Client) CallServer(ctx context.Context, method, path string, body []byt
 	return c.call(ctx, method, path, body, tool, c.authMode == AuthBearer)
 }
 
+// HeaderIdempotencyKey makes a POST retry safe: the server can deduplicate
+// repeated deliveries of the same mutation.
+const HeaderIdempotencyKey = "Idempotency-Key"
+
+type idempotencyKeyKey struct{}
+
+// WithIdempotencyKey returns a copy of ctx carrying an idempotency key for
+// mutation requests. POST retries are allowed only when one is supplied or
+// the response establishes that no commit occurred.
+func WithIdempotencyKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, idempotencyKeyKey{}, key)
+}
+
+func idempotencyKeyFromContext(ctx context.Context) string {
+	key, _ := ctx.Value(idempotencyKeyKey{}).(string)
+	return key
+}
+
 // call is the single HTTP path for every request. Call requires a token;
 // read-only wrappers and Ping may call without one because a Meshery Server
 // in local provider mode has no authentication.
@@ -219,10 +239,13 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, too
 		return nil, err
 	}
 
-	// A request may carry its caller's token (HTTP transport); fall back to
-	// the client's stored token for stdio and direct callers.
+	// A request may carry its caller's token (HTTP transport). A copy of the
+	// startup token is inherited, not an independent credential: use the
+	// current store value after Revoke or SetToken. Other context tokens are
+	// explicitly supplied and take precedence. Stdio and direct callers use
+	// the stored token.
 	token, ok := TokenFromContext(ctx)
-	if !ok || token == "" {
+	if !ok || token == "" || token == c.startupToken {
 		token, ok = c.tokens.Get()
 	}
 	if requireToken && !ok {
@@ -240,6 +263,9 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, too
 		c.applyAuth(req, token)
 		if c.keychainScope != "" {
 			req.Header.Set(HeaderKeychainScope, c.keychainScope)
+		}
+		if key := idempotencyKeyFromContext(ctx); key != "" {
+			req.Header.Set(HeaderIdempotencyKey, key)
 		}
 
 		resp, err := c.http.Do(req)
@@ -262,6 +288,13 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, too
 		}
 
 		class := Classify(resp, responseBody)
+		// A POST may commit before its response is written, so retry it only
+		// when the response shows the request was rejected before any commit
+		// (429), or the caller supplied an idempotency key. GET and other
+		// idempotent methods keep the existing retry behavior.
+		canRetry := method != http.MethodPost ||
+			class.Class == ClassRateLimited ||
+			idempotencyKeyFromContext(ctx) != ""
 		switch class.Class {
 		case ClassReauth:
 			return nil, ErrReauth(fmt.Errorf("HTTP %d", resp.StatusCode))
@@ -277,7 +310,7 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, too
 				Underlying:   fmt.Errorf("HTTP %d %s", resp.StatusCode, message),
 			}
 		case ClassRateLimited:
-			if attempt == c.maxRetries {
+			if attempt == c.maxRetries || !canRetry {
 				retryAfter := class.RetryAfter
 				if retryAfter == 0 {
 					retryAfter = c.backoff.Cap
@@ -292,7 +325,7 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, too
 			}
 			continue
 		case ClassServiceUnavailable:
-			if attempt == c.maxRetries {
+			if attempt == c.maxRetries || !canRetry {
 				return nil, ErrServiceUnavailable(fmt.Errorf("HTTP 503 after %d attempts", c.maxRetries+1))
 			}
 			if err := c.sleep(ctx, class.RetryAfter, attempt); err != nil {

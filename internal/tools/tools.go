@@ -66,6 +66,9 @@ func newPortableToolEntry(t Tool) toolEntry {
 		add: func(s *mcp.Server) {
 			mcp.AddTool(s, mt, func(ctx context.Context, _ *mcp.CallToolRequest, in map[string]any) (*mcp.CallToolResult, any, error) {
 				out, err := t.Handler(ctx, in)
+				if result, ok := err.(interface{ StructuredResult() any }); ok {
+					return nil, result.StructuredResult(), nil
+				}
 				return nil, out, err
 			})
 		},
@@ -110,6 +113,17 @@ func toolsets(r Registry) []toolset {
 func readOnly() *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{ReadOnlyHint: true}
 }
+
+// confirmationNeeded is a handler signal that a mutating tool stopped at the
+// confirmation gate. The portable adapter turns it into a structured result
+// instead of a tool error; other errors keep the SDK's normal mapping.
+type confirmationNeeded struct {
+	result any
+	reason string
+}
+
+func (e *confirmationNeeded) Error() string         { return e.reason }
+func (e *confirmationNeeded) StructuredResult() any { return e.result }
 
 // Tool describes a portable MCP tool: its name, description, JSON Schema
 // input and handler. Used by tool sets not yet adapted to the SDK.

@@ -68,25 +68,25 @@ func newAPIError(method, path string, status int, body []byte, token string) *AP
 		Kind:   kindForStatus(status),
 	}
 	var parsed apiErrorBody
-	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error != "" {
-		e.Message = parsed.Error
-		e.Code = parsed.Code
-		e.Causes = parsed.ProbableCause
-		e.Remedies = parsed.SuggestedRemediation
-	} else {
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		// Plaintext error: redact before truncating so a token crossing the
+		// 512-byte cut cannot survive in the retained message.
 		e.Message = truncate(redact(token, string(body)), 512)
 		return e
 	}
-	if token == "" {
+	if parsed.Error == "" {
+		// Valid JSON that is not a supported diagnostic shape: the raw body
+		// could carry credentials in unknown fields, so use the status text.
+		e.Message = http.StatusText(e.Status)
 		return e
 	}
-	e.Message = strings.ReplaceAll(e.Message, token, "[REDACTED]")
-	e.Code = strings.ReplaceAll(e.Code, token, "[REDACTED]")
-	for i := range e.Causes {
-		e.Causes[i] = strings.ReplaceAll(e.Causes[i], token, "[REDACTED]")
+	e.Message = redact(token, parsed.Error)
+	e.Code = redact(token, parsed.Code)
+	for _, cause := range parsed.ProbableCause {
+		e.Causes = append(e.Causes, redact(token, cause))
 	}
-	for i := range e.Remedies {
-		e.Remedies[i] = strings.ReplaceAll(e.Remedies[i], token, "[REDACTED]")
+	for _, remedy := range parsed.SuggestedRemediation {
+		e.Remedies = append(e.Remedies, redact(token, remedy))
 	}
 	return e
 }

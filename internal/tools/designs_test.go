@@ -74,6 +74,10 @@ func min(a, b int) int {
 	return b
 }
 
+// deployOK is the pattern handler's per-component response for a successful
+// single-component deploy/undeploy.
+const deployOK = `{"c1":[{"Summary":[{"Kind":"Service","Model":"Kubernetes","CompName":"productpage","Success":true,"Message":"Deployed design/productpage"}],"SystemName":"k8s","Location":"https://cluster"}]}`
+
 func TestListDesigns(t *testing.T) {
 	srv, mock := newMockCloud(t, scenario{
 		status: 200,
@@ -242,7 +246,7 @@ func TestGetDesignNotFound(t *testing.T) {
 func TestCreateDesign(t *testing.T) {
 	srv, mock := newMockCloud(t, scenario{
 		status: 200,
-		body:   `{"id":"d1","name":"my-design","version":"v1beta2","displayName":"My Design","status":"enabled"}`,
+		body:   `[{"id":"d1","name":"my-design","version":"v1beta2","displayName":"My Design","status":"enabled"}]`,
 	})
 	defer srv.Close()
 
@@ -287,7 +291,7 @@ func TestCreateDesign(t *testing.T) {
 func TestCreateDesignMissingConfirm(t *testing.T) {
 	srv, mock := newMockCloud(t, scenario{
 		status: 200,
-		body:   `{"id":"d1","name":"my-design","version":"v1beta2","displayName":"My Design","status":"enabled"}`,
+		body:   `[{"id":"d1","name":"my-design","version":"v1beta2","displayName":"My Design","status":"enabled"}]`,
 	})
 	defer srv.Close()
 
@@ -328,7 +332,7 @@ func TestDeployDesign(t *testing.T) {
 		},
 		scenario{
 			status: 200,
-			body:   `{"id":"d1","name":"bookinfo","version":"v1beta2"}`,
+			body:   deployOK,
 		},
 	)
 	defer srv.Close()
@@ -405,7 +409,7 @@ func TestUndeployDesign(t *testing.T) {
 		},
 		scenario{
 			status: 200,
-			body:   ``,
+			body:   deployOK,
 		},
 	)
 	defer srv.Close()
@@ -523,6 +527,50 @@ func TestDeleteDesign(t *testing.T) {
 	if mock.count("/api/pattern/d1") != 1 {
 		t.Errorf("expected 1 call to /api/pattern/d1, got %d", mock.count("/api/pattern/d1"))
 	}
+}
+
+func TestDeployDesignMixedResult(t *testing.T) {
+	mixed := `{"c1":[{"Summary":[
+		{"Kind":"Service","Model":"Kubernetes","CompName":"productpage","Success":true,"Message":"Deployed design/productpage"},
+		{"Kind":"Deployment","Model":"Kubernetes","CompName":"details","Success":false,"Message":"Error deploying design/details"},
+		{"Kind":"ConfigMap","Model":"Kubernetes","CompName":"prereq","Success":false,"IsPrerequisite":true,"Message":"failed install"}
+	],"SystemName":"k8s","Location":"https://cluster"}]}`
+	srv, mock := newMockCloud(t,
+		scenario{
+			status: 200,
+			body:   `{"id":"d1","name":"bookinfo","patternFile":"apiVersion: v1\nkind: Service\nmetadata:\n  name: productpage"}`,
+		},
+		scenario{status: 200, body: mixed},
+	)
+	defer srv.Close()
+
+	c := meshery.NewClient(srv.URL, "test-token", meshery.WithAuthMode(meshery.AuthCookie))
+	for _, tool := range NewDesignTools(c) {
+		if tool.Name != "deploy_design" {
+			continue
+		}
+		out, err := tool.Handler(context.Background(), map[string]any{
+			"design_id": "d1", "cluster_id": "cluster-1", "confirm": true,
+		})
+		if err != nil {
+			t.Fatalf("deploy_design handler failed: %v", err)
+		}
+		result, ok := out.(DeployDesignResult)
+		if !ok {
+			t.Fatalf("expected DeployDesignResult, got %T", out)
+		}
+		if result.Status != "failed" {
+			t.Errorf("status = %q, want failed", result.Status)
+		}
+		if len(result.Failed) != 1 || result.Failed[0].Component != "details" {
+			t.Errorf("failed = %+v, want only details", result.Failed)
+		}
+		if mock.count("/api/pattern/deploy") != 1 {
+			t.Errorf("deploy calls = %d, want 1", mock.count("/api/pattern/deploy"))
+		}
+		return
+	}
+	t.Fatal("deploy_design tool not found")
 }
 
 func TestCreateDesignBody(t *testing.T) {
