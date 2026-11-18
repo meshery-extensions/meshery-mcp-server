@@ -165,7 +165,7 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					return nil, err
 				}
 
-				resp, err := client.Call(ctx, http.MethodPost, "/api/pattern", body, "create_design")
+				resp, err := client.CallServer(ctx, http.MethodPost, "/api/pattern", body, "create_design")
 				if err != nil {
 					return nil, err
 				}
@@ -247,7 +247,7 @@ func NewDesignTools(client *meshery.Client) []Tool {
 				q := url.Values{}
 				q.Add("contexts", clusterID)
 
-				resp, err := client.Call(ctx, http.MethodPost, "/api/pattern/deploy?"+q.Encode(), deployBody, "deploy_design")
+				resp, err := client.CallServer(ctx, http.MethodPost, "/api/pattern/deploy?"+q.Encode(), deployBody, "deploy_design")
 				if err != nil {
 					return nil, err
 				}
@@ -330,7 +330,7 @@ func NewDesignTools(client *meshery.Client) []Tool {
 				q := url.Values{}
 				q.Add("contexts", clusterID)
 
-				_, err = client.Call(ctx, http.MethodDelete, "/api/pattern/deploy?"+q.Encode(), undeployBody, "undeploy_design")
+				_, err = client.CallServer(ctx, http.MethodDelete, "/api/pattern/deploy?"+q.Encode(), undeployBody, "undeploy_design")
 				if err != nil {
 					return nil, err
 				}
@@ -378,7 +378,7 @@ func NewDesignTools(client *meshery.Client) []Tool {
 					}, fmt.Errorf("delete_design would delete design %q. Set confirm: true to proceed", designID)
 				}
 
-				_, err := client.Call(ctx, http.MethodDelete, "/api/pattern/"+url.PathEscape(designID), nil, "delete_design")
+				_, err := client.CallServer(ctx, http.MethodDelete, "/api/pattern/"+url.PathEscape(designID), nil, "delete_design")
 				if err != nil {
 					return nil, err
 				}
@@ -390,6 +390,14 @@ func NewDesignTools(client *meshery.Client) []Tool {
 			},
 		},
 	}
+}
+
+func designToolset(portable []Tool) toolset {
+	entries := make([]toolEntry, 0, len(portable))
+	for _, t := range portable {
+		entries = append(entries, newPortableToolEntry(t))
+	}
+	return toolset{name: "designs", tools: entries}
 }
 
 // createDesignBody builds the POST /api/pattern payload. Meshery Server decodes

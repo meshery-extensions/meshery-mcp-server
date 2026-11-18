@@ -101,6 +101,7 @@ type Registry struct {
 	*Components
 	*Models
 	*Relationships
+	client *Client
 }
 
 func NewRegistry(c *Client) *Registry {
@@ -108,5 +109,10 @@ func NewRegistry(c *Client) *Registry {
 		Components:    &Components{client: c},
 		Models:        &Models{client: c},
 		Relationships: &Relationships{client: c},
+		client:        c,
 	}
 }
+
+// Client returns the underlying client for toolsets outside the three
+// registry domains, such as the design tools.
+func (r *Registry) Client() *Client { return r.client }

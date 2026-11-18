@@ -189,14 +189,23 @@ func (c *Client) Call(ctx context.Context, method, path string, body []byte, too
 	return c.call(ctx, method, path, body, tool, true)
 }
 
+// CallServer performs a mutation against Meshery Server. A local provider
+// deployment needs no token, so the request is sent without one when no
+// credential is available. Cloud (bearer) calls still require a token.
+func (c *Client) CallServer(ctx context.Context, method, path string, body []byte, tool string) ([]byte, error) {
+	return c.call(ctx, method, path, body, tool, c.authMode == AuthBearer)
+}
+
 // call is the single HTTP path for every request. Call requires a token;
 // read-only wrappers and Ping may call without one because a Meshery Server
 // in local provider mode has no authentication.
 func (c *Client) call(ctx context.Context, method, path string, body []byte, tool string, requireToken bool) ([]byte, error) {
-	if deadline, ok := ctx.Deadline(); !ok || (c.http.Timeout > 0 && time.Until(deadline) > c.http.Timeout) {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.http.Timeout)
-		defer cancel()
+	if c.http.Timeout > 0 {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > c.http.Timeout {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.http.Timeout)
+			defer cancel()
+		}
 	}
 
 	family := FamilyForRoute(method, path)
@@ -210,7 +219,12 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, too
 		return nil, err
 	}
 
-	token, ok := c.tokens.Get()
+	// A request may carry its caller's token (HTTP transport); fall back to
+	// the client's stored token for stdio and direct callers.
+	token, ok := TokenFromContext(ctx)
+	if !ok || token == "" {
+		token, ok = c.tokens.Get()
+	}
 	if requireToken && !ok {
 		return nil, ErrNoToken()
 	}
@@ -319,10 +333,12 @@ func (c *Client) sleep(ctx context.Context, retryAfter time.Duration, attempt in
 // unknown or already-revoked tokens also answer 200). 503 is retried with
 // backoff; 401 is the only re-auth signal.
 func (c *Client) Revoke(ctx context.Context) error {
-	if deadline, ok := ctx.Deadline(); !ok || (c.http.Timeout > 0 && time.Until(deadline) > c.http.Timeout) {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.http.Timeout)
-		defer cancel()
+	if c.http.Timeout > 0 {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > c.http.Timeout {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.http.Timeout)
+			defer cancel()
+		}
 	}
 
 	token, _ := c.tokens.Get()

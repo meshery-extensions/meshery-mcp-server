@@ -68,7 +68,7 @@ docker_signs:
   args:
   - sign
   - --yes
-  - ${artifact}
+  - ${artifact}@${digest}
 
 release:
   name_template: "Meshery MCP Server {{.Tag}}"
