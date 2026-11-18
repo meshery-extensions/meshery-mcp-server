@@ -14,6 +14,8 @@ import (
 	modelv1beta1 "github.com/meshery/schemas/models/v1beta1/model"
 	componentv1beta3 "github.com/meshery/schemas/models/v1beta3/component"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/meshery-extensions/meshery-mcp-server/internal/meshery"
 )
 
 // fakeRegistry implements Registry. Each method records that it was called
@@ -64,6 +66,15 @@ func (f *fakeRegistry) ListRelationships(_ context.Context, model string) ([]rel
 	f.gotModel = model
 	return f.relationships, f.err
 }
+
+// designRegistry is a fakeRegistry that also exposes a Meshery client, as the
+// real meshery.Registry does, so toolsets includes the design toolset.
+type designRegistry struct {
+	*fakeRegistry
+	client *meshery.Client
+}
+
+func (d *designRegistry) Client() *meshery.Client { return d.client }
 
 // mustUUID parses a UUID literal for test fixtures.
 func mustUUID(t *testing.T, s string) uuid.UUID {
@@ -154,6 +165,25 @@ func TestRegister_ReturnsToolNames(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	want := []string{"search_components", "get_component", "list_models", "get_model", "list_relationships"}
+	if !slices.Equal(names, want) {
+		t.Errorf("names = %v, want %v", names, want)
+	}
+}
+
+func TestRegister_IncludesDesignTools(t *testing.T) {
+	r := &designRegistry{
+		fakeRegistry: &fakeRegistry{},
+		client:       meshery.NewClient("http://localhost", "test-token"),
+	}
+	names, err := Register(newServer(), r)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	want := []string{
+		"search_components", "get_component", "list_models", "get_model",
+		"list_relationships", "list_designs", "get_design", "create_design",
+		"deploy_design", "undeploy_design", "delete_design",
+	}
 	if !slices.Equal(names, want) {
 		t.Errorf("names = %v, want %v", names, want)
 	}
@@ -258,6 +288,31 @@ func TestTools_Call(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestTools_PendingConfirmationIsStructuredResult(t *testing.T) {
+	// The client URL is unreachable: a confirmation gate must not make a
+	// Meshery request.
+	r := &designRegistry{
+		fakeRegistry: &fakeRegistry{},
+		client:       meshery.NewClient("http://127.0.0.1:1", "test-token"),
+	}
+	cs := connect(t, r, protocolVersions[0])
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "deploy_design",
+		Arguments: map[string]any{"design_id": "d1", "cluster_id": "c1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("pending confirmation should be a structured result, got error: %+v", res.Content)
+	}
+	got, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(got), "pending_confirmation") {
+		t.Errorf("structured content = %s, want pending_confirmation", got)
 	}
 }
 

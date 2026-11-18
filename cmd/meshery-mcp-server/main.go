@@ -76,6 +76,32 @@ func run(boot logger.Handler) (logger.Handler, error) {
 	log.Infof("starting %s version=%s commit=%s meshery_url=%s token_configured=%t transport=%s",
 		appName, version, commitsha, cfg.Meshery.RedactedURL(), cfg.Auth.Token != "", cfg.Transport.Mode)
 
+	client, err := meshery.New(meshery.Config{
+		BaseURL:            cfg.Meshery.URL,
+		Token:              string(cfg.Auth.Token),
+		Timeout:            cfg.Meshery.Timeout,
+		MaxRetries:         cfg.Meshery.MaxRetries,
+		MaxConcurrentCalls: cfg.Meshery.MaxConcurrentCalls,
+		KeychainScope:      cfg.Meshery.KeychainScope,
+		AuthMode:           meshery.AuthMode(cfg.Meshery.AuthMode),
+	})
+	if err != nil {
+		return boot, err
+	}
+	log.Infof("meshery client ready: url=%s token_configured=%t keychain_scope=%q max_concurrent_calls=%d max_retries=%d timeout=%s",
+		cfg.Meshery.URL, cfg.Auth.Token != "", cfg.Meshery.KeychainScope,
+		cfg.Meshery.MaxConcurrentCalls, cfg.Meshery.MaxRetries, cfg.Meshery.Timeout)
+
+	// A health check is advisory: the MCP server can still start so tools can
+	// report the failure themselves.
+	pingCtx, cancel := context.WithTimeout(context.Background(), cfg.Meshery.Timeout)
+	defer cancel()
+	if version, err := client.Ping(pingCtx); err != nil {
+		log.Warnf("meshery health check failed: %v", err)
+	} else {
+		log.Infof("meshery reachable: build=%q commitsha=%q", version.Build, version.Commitsha)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
@@ -89,7 +115,7 @@ func run(boot logger.Handler) (logger.Handler, error) {
 		Name:        appName,
 		Version:     version,
 		Logger:      sdkLog,
-		Registry:    meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL)),
+		Registry:    meshery.NewRegistry(client),
 		Credentials: auth.Resolver(cfg.Auth),
 	}
 

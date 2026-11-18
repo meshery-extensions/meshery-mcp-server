@@ -11,33 +11,48 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
 
 const (
-	keyMesheryURL    = "meshery.url"
-	keyTransportMode = "transport.mode"
-	keyTransportHost = "transport.host"
-	keyTransportPort = "transport.port"
-	keyLogLevel      = "log.level"
-	keyLogFormat     = "log.format"
+	keyMesheryURL                = "meshery.url"
+	keyMesheryAuthMode           = "meshery.auth_mode"
+	keyMesheryKeychainScope      = "meshery.keychain_scope"
+	keyMesheryMaxConcurrentCalls = "meshery.max_concurrent_calls"
+	keyMesheryMaxRetries         = "meshery.max_retries"
+	keyMesheryTimeout            = "meshery.timeout"
+	keyTransportMode             = "transport.mode"
+	keyTransportHost             = "transport.host"
+	keyTransportPort             = "transport.port"
+	keyLogLevel                  = "log.level"
+	keyLogFormat                 = "log.format"
 
-	envMesheryURL    = "MESHERY_SERVER_URL"
-	envMesheryToken  = "MESHERY_API_TOKEN" //nolint:gosec // G101: env var name, not a credential
-	envTransportMode = "MESHERY_MCP_TRANSPORT"
-	envTransportHost = "MESHERY_MCP_HOST"
-	envTransportPort = "MESHERY_MCP_PORT"
-	envAccessKey     = "MESHERY_MCP_ACCESS_KEY" //nolint:gosec // G101: env var name, not a credential
-	envLogLevel      = "LOG_LEVEL"
-	envLogFormat     = "LOG_FORMAT"
+	envMesheryURL                = "MESHERY_SERVER_URL"
+	envMesheryAuthMode           = "MESHERY_AUTH_MODE"
+	envMesheryKeychainScope      = "MESHERY_KEYCHAIN_SCOPE"
+	envMesheryMaxConcurrentCalls = "MESHERY_MAX_CONCURRENT_CALLS"
+	envMesheryMaxRetries         = "MESHERY_MAX_RETRIES"
+	envMesheryTimeout            = "MESHERY_TIMEOUT"
+	envMesheryToken              = "MESHERY_API_TOKEN" //nolint:gosec // G101: env var name, not a credential
+	envTransportMode             = "MESHERY_MCP_TRANSPORT"
+	envTransportHost             = "MESHERY_MCP_HOST"
+	envTransportPort             = "MESHERY_MCP_PORT"
+	envAccessKey                 = "MESHERY_MCP_ACCESS_KEY" //nolint:gosec // G101: env var name, not a credential
+	envLogLevel                  = "LOG_LEVEL"
+	envLogFormat                 = "LOG_FORMAT"
 
-	defaultMesheryURL    = "http://localhost:9081"
-	defaultTransportMode = TransportStdio
-	defaultTransportHost = "127.0.0.1"
-	defaultTransportPort = 8080
-	defaultLogLevel      = LogLevelInfo
-	defaultLogFormat     = LogFormatText
+	defaultMesheryURL         = "http://localhost:9081"
+	defaultAuthMode           = "cookie"
+	defaultMaxConcurrentCalls = 4
+	defaultMaxRetries         = 3
+	defaultTimeout            = 30 * time.Second
+	defaultTransportMode      = TransportStdio
+	defaultTransportHost      = "127.0.0.1"
+	defaultTransportPort      = 8080
+	defaultLogLevel           = LogLevelInfo
+	defaultLogFormat          = LogFormatText
 
 	// MinAccessKeyLength is the shortest HTTP access key accepted: 32
 	// characters, as produced by `openssl rand -hex 16` or longer.
@@ -88,7 +103,12 @@ type Config struct {
 
 // MesheryConfig describes where the Meshery server is. It holds no identity.
 type MesheryConfig struct {
-	URL string `mapstructure:"url"`
+	URL                string        `mapstructure:"url"`
+	AuthMode           string        `mapstructure:"auth_mode"`
+	KeychainScope      string        `mapstructure:"keychain_scope"`
+	MaxConcurrentCalls int           `mapstructure:"max_concurrent_calls"`
+	MaxRetries         int           `mapstructure:"max_retries"`
+	Timeout            time.Duration `mapstructure:"timeout"`
 }
 
 // RedactedURL returns the URL with any password replaced by "xxxxx", for logs.
@@ -139,6 +159,11 @@ type Flags struct {
 func Load(configPath string, flags Flags) (*Config, error) {
 	v := viper.New()
 	v.SetDefault(keyMesheryURL, defaultMesheryURL)
+	v.SetDefault(keyMesheryAuthMode, defaultAuthMode)
+	v.SetDefault(keyMesheryKeychainScope, "")
+	v.SetDefault(keyMesheryMaxConcurrentCalls, defaultMaxConcurrentCalls)
+	v.SetDefault(keyMesheryMaxRetries, defaultMaxRetries)
+	v.SetDefault(keyMesheryTimeout, defaultTimeout)
 	v.SetDefault(keyTransportMode, string(defaultTransportMode))
 	v.SetDefault(keyTransportHost, defaultTransportHost)
 	v.SetDefault(keyTransportPort, defaultTransportPort)
@@ -165,6 +190,11 @@ func Load(configPath string, flags Flags) (*Config, error) {
 	// MustBindEnv only fails when called without a key, which would be a bug
 	// here, not something a user can fix; panicking is appropriate.
 	v.MustBindEnv(keyMesheryURL, envMesheryURL)
+	v.MustBindEnv(keyMesheryAuthMode, envMesheryAuthMode)
+	v.MustBindEnv(keyMesheryKeychainScope, envMesheryKeychainScope)
+	v.MustBindEnv(keyMesheryMaxConcurrentCalls, envMesheryMaxConcurrentCalls)
+	v.MustBindEnv(keyMesheryMaxRetries, envMesheryMaxRetries)
+	v.MustBindEnv(keyMesheryTimeout, envMesheryTimeout)
 	v.MustBindEnv(keyTransportMode, envTransportMode)
 	v.MustBindEnv(keyTransportHost, envTransportHost)
 	v.MustBindEnv(keyTransportPort, envTransportPort)
@@ -187,6 +217,7 @@ func Load(configPath string, flags Flags) (*Config, error) {
 		return nil, ErrDecodeConfig(err)
 	}
 	cfg.Auth.Token = Secret(os.Getenv(envMesheryToken))
+	cfg.Meshery.AuthMode = strings.ToLower(strings.TrimSpace(cfg.Meshery.AuthMode))
 	cfg.Transport.Mode = TransportMode(strings.ToLower(strings.TrimSpace(string(cfg.Transport.Mode))))
 	cfg.Transport.Host = strings.ToLower(strings.TrimSpace(cfg.Transport.Host))
 	if cfg.Transport.Mode == TransportHTTP {
@@ -225,6 +256,12 @@ func (c *Config) validate() error {
 		return ErrInvalidMesheryURL(fmt.Sprintf("URL %v has no host", u.Redacted()))
 	}
 
+	switch c.Meshery.AuthMode {
+	case "cookie", "bearer":
+	default:
+		return ErrInvalidAuthMode(c.Meshery.AuthMode)
+	}
+
 	switch c.Transport.Mode {
 	case TransportStdio:
 	case TransportHTTP:
@@ -253,6 +290,15 @@ func (c *Config) validate() error {
 	case LogFormatText, LogFormatJSON:
 	default:
 		return ErrInvalidLogFormat(c.Log.Format)
+	}
+	if c.Meshery.MaxConcurrentCalls < 1 {
+		return ErrInvalidMaxConcurrentCalls(c.Meshery.MaxConcurrentCalls)
+	}
+	if c.Meshery.MaxRetries < 0 {
+		return ErrInvalidMaxRetries(c.Meshery.MaxRetries)
+	}
+	if c.Meshery.Timeout <= 0 {
+		return ErrInvalidTimeout(c.Meshery.Timeout)
 	}
 	return nil
 }

@@ -9,7 +9,11 @@
 package tools
 
 import (
+	"context"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/meshery-extensions/meshery-mcp-server/internal/meshery"
 )
 
 // Registry is everything the tools need from Meshery. Each domain declares
@@ -49,6 +53,28 @@ func newToolEntry[In, Out any](t *mcp.Tool, h mcp.ToolHandlerFor[In, Out]) toolE
 	}
 }
 
+// newPortableToolEntry adapts a Tool that carries its own JSON Schema into the
+// SDK's typed registration path, keeping input validation and error mapping.
+func newPortableToolEntry(t Tool) toolEntry {
+	mt := &mcp.Tool{
+		Name:        t.Name,
+		Description: t.Description,
+		InputSchema: t.InputSchema,
+	}
+	return toolEntry{
+		tool: mt,
+		add: func(s *mcp.Server) {
+			mcp.AddTool(s, mt, func(ctx context.Context, _ *mcp.CallToolRequest, in map[string]any) (*mcp.CallToolResult, any, error) {
+				out, err := t.Handler(ctx, in)
+				if result, ok := err.(interface{ StructuredResult() any }); ok {
+					return nil, result.StructuredResult(), nil
+				}
+				return nil, out, err
+			})
+		},
+	}
+}
+
 // Register adds every tool to s and returns their names, in registration
 // order. The SDK has no way to list a server's tools, so this is how the
 // server learns what it registered.
@@ -71,13 +97,39 @@ func Register(s *mcp.Server, r Registry) ([]string, error) {
 }
 
 func toolsets(r Registry) []toolset {
-	return []toolset{
+	sets := []toolset{
 		componentToolset(r),
 		modelToolset(r),
 		relationshipToolset(r),
 	}
+	// Only the real Meshery registry exposes its client; test registries and
+	// other implementations simply do not advertise design tools.
+	if provider, ok := r.(interface{ Client() *meshery.Client }); ok {
+		sets = append(sets, designToolset(NewDesignTools(provider.Client())))
+	}
+	return sets
 }
 
 func readOnly() *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{ReadOnlyHint: true}
+}
+
+// confirmationNeeded is a handler signal that a mutating tool stopped at the
+// confirmation gate. The portable adapter turns it into a structured result
+// instead of a tool error; other errors keep the SDK's normal mapping.
+type confirmationNeeded struct {
+	result any
+	reason string
+}
+
+func (e *confirmationNeeded) Error() string         { return e.reason }
+func (e *confirmationNeeded) StructuredResult() any { return e.result }
+
+// Tool describes a portable MCP tool: its name, description, JSON Schema
+// input and handler. Used by tool sets not yet adapted to the SDK.
+type Tool struct {
+	Name        string
+	Description string
+	InputSchema map[string]any
+	Handler     func(ctx context.Context, args any) (any, error)
 }

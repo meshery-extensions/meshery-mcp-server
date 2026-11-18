@@ -335,3 +335,48 @@ func TestLoad_LogFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_AuthMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		env      string
+		fileYAML string
+		want     string
+		wantErr  string
+	}{
+		{name: "defaults to cookie", want: "cookie"},
+		{name: "bearer from env, case-insensitive", env: " BEARER ", want: "bearer"},
+		{name: "bearer from file", fileYAML: "meshery:\n  auth_mode: bearer\n", want: "bearer"},
+		{name: "env beats file", env: "cookie", fileYAML: "meshery:\n  auth_mode: bearer\n", want: "cookie"},
+		{name: "invalid mode", env: "magic", wantErr: "Invalid Meshery auth mode"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envMesheryURL, "")
+			t.Setenv(envMesheryToken, "")
+			t.Setenv(envLogLevel, "")
+			t.Setenv(envLogFormat, "")
+			t.Setenv(envMesheryAuthMode, tt.env)
+			clearTransportEnv(t)
+
+			path := ""
+			if tt.fileYAML != "" {
+				path = writeConfigFile(t, tt.fileYAML)
+			}
+
+			cfg, err := Load(path, Flags{})
+			if tt.wantErr != "" {
+				if err == nil || errors.GetSDescription(err) != tt.wantErr {
+					t.Fatalf("want error %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.Meshery.AuthMode != tt.want {
+				t.Errorf("AuthMode = %q, want %q", cfg.Meshery.AuthMode, tt.want)
+			}
+		})
+	}
+}

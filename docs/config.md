@@ -7,6 +7,11 @@ meshery-mcp-server reads its configuration once, at startup. To change a setting
 | Setting | Flag | Environment variable | Config file key | Default | Accepted values |
 |---|---|---|---|---|---|
 | Meshery server URL | | `MESHERY_SERVER_URL` | `meshery.url` | `http://localhost:9081` | An `http://` or `https://` URL with a host |
+| Authentication mode | | `MESHERY_AUTH_MODE` | `meshery.auth_mode` | `cookie` | `cookie` (Meshery Server), `bearer` (Meshery Cloud), case-insensitive |
+| Keychain scope | | `MESHERY_KEYCHAIN_SCOPE` | `meshery.keychain_scope` | *(none)* | Comma-separated keychain ids/names; empty = unscoped token |
+| Max concurrent Cloud calls per tool | | `MESHERY_MAX_CONCURRENT_CALLS` | `meshery.max_concurrent_calls` | `4` | Integer >= 1 |
+| Max Cloud retries per call | | `MESHERY_MAX_RETRIES` | `meshery.max_retries` | `3` | Integer >= 0 |
+| HTTP request timeout | | `MESHERY_TIMEOUT` | `meshery.timeout` | `30s` | Positive Go duration, e.g. `10s`, `1m` |
 | Meshery provider token | | `MESHERY_API_TOKEN` | *(not allowed)* | *(none)* | Any string |
 | Transport | `--transport` | `MESHERY_MCP_TRANSPORT` | `transport.mode` | `stdio` | `stdio`, `http` (case-insensitive) |
 | HTTP host | `--host` | `MESHERY_MCP_HOST` | `transport.host` | `127.0.0.1` | A loopback address: `127.0.0.1`, `::1`, `localhost` |
@@ -86,6 +91,64 @@ The token is a credential. The server never prints it: it is redacted as `[REDAC
 - **Set it in the environment** (`MESHERY_API_TOKEN`). The config file cannot hold it: config files get copied, shared and committed, and the MCP specification expects stdio servers to take credentials from the environment.
 - **With Docker**, pass it as `-e MESHERY_API_TOKEN` with no `=value`. Docker then copies the value from its own environment, so the token never appears in the command line or in process listings.
 - **Never bake it into an image** with `ENV` or `--build-arg`. Build arguments are recorded in the image and readable with `docker history`.
+
+## How the token is sent
+
+Meshery Server and Meshery Cloud authenticate differently. `MESHERY_AUTH_MODE` / `meshery.auth_mode` selects which one the client talks to; the default is `cookie`:
+
+- **Meshery Server** (`cookie`, the default): the server reads a cookie named `token`, not an `Authorization` header and not a `token` request header. The client sends `Cookie: token=<MESHERY_API_TOKEN>` and, when configured, `meshery-provider=<name>`. This comes from the server's `RemoteProvider.GetToken` (`server/models/remote_auth.go`). A local provider deployment needs no token.
+- **Meshery Cloud** (`bearer`): Cloud reads `Authorization: Bearer <token>`. Set `MESHERY_AUTH_MODE=bearer` together with a Cloud `MESHERY_SERVER_URL`; the binary then builds the client with the Cloud auth mode.
+
+`GET /api/system/version` is unauthenticated, so the startup health check never sends credentials. Tokens are redacted from errors and logs. Credentials are dropped when a redirect crosses hosts or downgrades from HTTPS to HTTP, and redirects are capped at 10 hops so a self-redirecting endpoint cannot loop until the request timeout.
+
+## Cloud API-token behavior
+
+When `MESHERY_AUTH_MODE=bearer` and `MESHERY_SERVER_URL` points at Meshery Cloud, the client behaves as follows:
+
+**Keychain-scoped tokens (#6369).** `meshery.keychain_scope` / `MESHERY_KEYCHAIN_SCOPE` requests the narrowest
+keychain scope the deployment needs; it defaults to empty, which means no
+keychain scope and the previous, unscoped behavior. A scoped token receives
+403 on any route that makes no key check.
+
+A Cloud 403 is treated as "insufficient scope", never as "bad token", so it
+never triggers sign-in. When Cloud's response identifies the missing scope
+or key, the error names it and tells the operator to grant it (or to set
+`MESHERY_KEYCHAIN_SCOPE`); when it does not, the error says so.
+
+**Per-user rate limits (#6333).** Cloud enforces a token bucket per (route
+family, caller). Concurrent Cloud calls are bound per tool
+(`meshery.max_concurrent_calls`, default 4) so one tool invocation—or a
+batch—cannot flood a route family. On 429 the client honors `Retry-After`
+(delta-seconds or HTTP-date); without it, it backs off exponentially with
+jitter (capped at 8s). Retries are bounded (default 3), context-aware, and
+never a tight loop; exhausted retries surface
+"rate limited by Cloud; retry after N seconds". 429 is not an auth failure.
+
+**Revocation (#6381).** `POST /revoke` retires Cloud-issued tokens
+immediately. As soon as the user revokes, the cached token is dropped
+client-side (memory; disk/keyring/session stores are emptied the same way)
+regardless of the server's response. Revocation succeeds only when Cloud
+answers 200; 503 is retried with backoff, never reported as success.
+401 remains the only re-auth signal.
+
+**IdP outage (#6366).** Cloud answers 503 on an identity-provider outage
+instead of 401. The client backs off on 503 (bounded retries with jitter)
+and surfaces "service unavailable". A 503 is never treated as "token
+revoked" or "token invalid": no stored credentials are cleared and no sign-in
+is forced. Cloud caches active introspection for at most 60s, so the client
+adds no longer client-side validity cache; only safe caches exist, evicted
+on revoke.
+
+## Troubleshooting
+
+| Status | Meaning | What to do |
+|--------|---------|------------|
+| 401 | Token missing, expired or revoked | Sign in again (Cloud OAuth); this is the only status that triggers re-auth |
+| 403 | Insufficient keychain scope | Grant the missing scope named in the error, or set `MESHERY_KEYCHAIN_SCOPE` to the narrowest scope the deployment needs; do not re-auth |
+| 429 | Rate limited | Wait for `Retry-After` (or the backoff) and retry; reduce `meshery.max_concurrent_calls` if batches keep hitting it |
+| 503 | Cloud service unavailable | Retry later; no credential changes are made |
+| Unreachable server | Connection refused, DNS failure or timeout | Check `MESHERY_SERVER_URL` and `MESHERY_TIMEOUT`; the error names the URL |
+| Invalid request timeout | `MESHERY_TIMEOUT` / `meshery.timeout` is zero or negative | Set a positive duration such as `30s` |
 
 The same applies to `MESHERY_MCP_ACCESS_KEY`: environment only, never in the config file or on the command line.
 
@@ -252,6 +315,10 @@ Configuration problems and HTTP listen failures stop the server at startup; a sl
 | `meshery-mcp-server-1021` | HTTP access key is required | `RunHTTP` was called without an access key (config validation normally catches this first) | Set `MESHERY_MCP_ACCESS_KEY` |
 | `meshery-mcp-server-1022` | HTTP server did not shut down cleanly | Requests were still running when the 5-second shutdown timeout ended | None needed; remaining connections were closed |
 | `meshery-mcp-server-1023` | Invalid log format | `LOG_FORMAT` / `log.format` is not a supported format | Use `text` or `json` |
+| `meshery-mcp-server-1024` | Invalid max concurrent calls | `MESHERY_MAX_CONCURRENT_CALLS` / `meshery.max_concurrent_calls` is below 1 | Set it to an integer >= 1 |
+| `meshery-mcp-server-1025` | Invalid max retries | `MESHERY_MAX_RETRIES` / `meshery.max_retries` is negative | Set it to an integer >= 0 |
+| `meshery-mcp-server-1026` | Invalid request timeout | `MESHERY_TIMEOUT` / `meshery.timeout` is zero or negative | Set it to a positive duration such as `30s` |
+| `meshery-mcp-server-1027` | Invalid Meshery auth mode | `MESHERY_AUTH_MODE` / `meshery.auth_mode` is neither `cookie` nor `bearer` | Set it to `cookie` for Meshery Server or `bearer` for Meshery Cloud |
 
 Logs and error messages never include the token, the access key, or any password embedded in the URL: the startup line logs the URL with the password replaced by `xxxxx`.
 

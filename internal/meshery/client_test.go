@@ -2,10 +2,479 @@ package meshery
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
+
+type scenario struct {
+	status     int
+	body       string
+	retryAfter string
+}
+
+// mockCloud answers a fixed queue of scenarios, one per request, so tests
+// can count exactly how many requests Cloud saw (no tight retry loops).
+type mockCloud struct {
+	mu     sync.Mutex
+	steps  []scenario
+	idx    int
+	counts map[string]int
+	auths  map[string][]string
+}
+
+func (m *mockCloud) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	path := r.URL.Path
+	m.counts[path]++
+	m.auths[path] = append(m.auths[path], r.Header.Get("Authorization"))
+
+	step := m.steps[min(m.idx, len(m.steps)-1)]
+	m.idx++
+
+	if step.retryAfter != "" {
+		w.Header().Set("Retry-After", step.retryAfter)
+	}
+	w.WriteHeader(step.status)
+	_, _ = w.Write([]byte(step.body))
+	_, _ = io.ReadAll(r.Body)
+	_ = r.Body.Close()
+}
+
+func (m *mockCloud) count(path string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.counts[path]
+}
+
+func (m *mockCloud) lastAuth(path string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	auths := m.auths[path]
+	if len(auths) == 0 {
+		return ""
+	}
+	return auths[len(auths)-1]
+}
+
+func newMockCloud(t *testing.T, steps ...scenario) (*httptest.Server, *mockCloud) {
+	t.Helper()
+	m := &mockCloud{steps: steps, counts: map[string]int{}, auths: map[string][]string{}}
+	return httptest.NewServer(m), m
+}
+
+func TestCallReturnsBody(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 200, body: `{"ok": true}`})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token", WithKeychainScope("org:admin"))
+	out, err := c.Call(context.Background(), http.MethodPost, "/api/claims", []byte(`{}`), "tool-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"ok"`) {
+		t.Errorf("unexpected body: %s", out)
+	}
+	if mock.count("/api/claims") != 1 {
+		t.Errorf("Cloud called %d times, want 1", mock.count("/api/claims"))
+	}
+	if got := mock.lastAuth("/api/claims"); got != "Bearer test-token" {
+		t.Errorf("authorization header = %q, want Bearer test-token", got)
+	}
+	if strings.Contains(string(out), `"ok": true`) == false {
+		t.Errorf("unexpected body: %s", out)
+	}
+}
+
+func TestCall401IsReauthNoRetry(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 401, body: `{"error":"invalid_token"}`})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/claims", nil, "tool-a")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "Authentication required") {
+		t.Errorf("expected reauth error, got: %v", err)
+	}
+	if mock.count("/api/claims") != 1 {
+		t.Errorf("Cloud called %d times after 401, want 1 (no retry)", mock.count("/api/claims"))
+	}
+}
+
+func TestCall403MissingScope(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 403, body: `{"missing_scope":"org:admin"}`})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	_, err := c.Call(context.Background(), http.MethodPost, "/api/ledgers", nil, "tool-a")
+	var insufficient *ErrInsufficientScope
+	if !errors.As(err, &insufficient) {
+		t.Fatalf("expected ErrInsufficientScope, got %v", err)
+	}
+	if insufficient.MissingScope != "org:admin" {
+		t.Errorf("MissingScope = %q, want org:admin", insufficient.MissingScope)
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("expected 403 in message: %v", err)
+	}
+	if mock.count("/api/ledgers") != 1 {
+		t.Errorf("Cloud called %d times after 403, want 1 (no retry)", mock.count("/api/ledgers"))
+	}
+}
+
+func TestCall403UnidentifiedScope(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 403, body: `{"error":"forbidden"}`})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/ledgers", nil, "tool-a")
+	var insufficient *ErrInsufficientScope
+	if !errors.As(err, &insufficient) {
+		t.Fatalf("expected ErrInsufficientScope, got %v", err)
+	}
+	if insufficient.MissingScope != "" {
+		t.Errorf("MissingScope = %q, want empty", insufficient.MissingScope)
+	}
+	if !strings.Contains(err.Error(), "did not identify") {
+		t.Errorf("expected 'did not identify' wording: %v", err)
+	}
+	if mock.count("/api/ledgers") != 1 {
+		t.Errorf("Cloud called %d times after 403, want 1 (no retry)", mock.count("/api/ledgers"))
+	}
+}
+
+func TestCall403RedactsTokenFromBodyAndScope(t *testing.T) {
+	srv, _ := newMockCloud(t, scenario{status: 403,
+		body: `{"missing_scope":"scope-for-secret-token","error":"denied for secret-token"}`})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "secret-token")
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/ledgers", nil, "tool-a")
+	var insufficient *ErrInsufficientScope
+	if !errors.As(err, &insufficient) {
+		t.Fatalf("expected ErrInsufficientScope, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Errorf("403 error leaked the token: %v", err)
+	}
+	if !strings.Contains(insufficient.MissingScope, "[REDACTED]") {
+		t.Errorf("missing scope was not redacted: %q", insufficient.MissingScope)
+	}
+}
+
+func TestAPIErrorRedactsEveryRetainedField(t *testing.T) {
+	srv, _ := newMockCloud(t, scenario{status: 400, body: `{
+		"error":"bad secret-token",
+		"code":"code-secret-token",
+		"probableCause":["cause secret-token"],
+		"suggestedRemediation":["fix secret-token"]
+	}`})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "secret-token")
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/ledgers", nil, "tool-a")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %v", err)
+	}
+	for name, field := range map[string]string{
+		"Message": apiErr.Message, "Code": apiErr.Code,
+		"Causes": strings.Join(apiErr.Causes, ","), "Remedies": strings.Join(apiErr.Remedies, ","),
+	} {
+		if strings.Contains(field, "secret-token") {
+			t.Errorf("%s leaked the token: %q", name, field)
+		}
+	}
+	if !strings.Contains(apiErr.Message, "[REDACTED]") || !strings.Contains(apiErr.Code, "[REDACTED]") ||
+		!strings.Contains(strings.Join(apiErr.Causes, ","), "[REDACTED]") ||
+		!strings.Contains(strings.Join(apiErr.Remedies, ","), "[REDACTED]") {
+		t.Errorf("expected redactions in all fields, got %+v", apiErr)
+	}
+}
+
+func TestAPIErrorRedactsFallbackBeforeTruncation(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		token  string
+		prefix string
+	}{
+		{name: "token crosses limit", token: "secret-token", prefix: strings.Repeat("x", 501)},
+		{name: "token exceeds limit", token: strings.Repeat("secret", 100)},
+		{name: "replacement contains token", token: "REDACTED"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewClient("http://localhost", tt.token)
+			body := "  " + tt.prefix + tt.token + strings.Repeat("z", 600) + "  "
+			err := c.apiError(http.MethodGet, "/api/ledgers", http.StatusBadRequest, []byte(body), tt.token)
+			want := tt.prefix + "[REDACTED]" + strings.Repeat("z", 600)
+			want = want[:512] + "..."
+			if err.Message != want {
+				t.Errorf("Message = %q, want %q", err.Message, want)
+			}
+		})
+	}
+}
+
+func TestCallServerTokenResolution(t *testing.T) {
+	t.Run("after revoke sends no startup token", func(t *testing.T) {
+		srv, mock := newMockCloud(t, scenario{status: 200, body: ""})
+		defer srv.Close()
+
+		c := NewClient(srv.URL, "startup")
+		if err := c.Revoke(context.Background()); err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		ctx := WithToken(context.Background(), "startup")
+		_, err := c.CallServer(ctx, http.MethodPost, "/api/pattern", nil, "tool")
+		if err == nil || !strings.Contains(err.Error(), "No API token configured") {
+			t.Fatalf("want ErrNoToken, got %v", err)
+		}
+		if mock.count("/api/pattern") != 0 {
+			t.Errorf("pattern calls = %d, want 0", mock.count("/api/pattern"))
+		}
+	})
+
+	t.Run("after rotation sends new token", func(t *testing.T) {
+		srv, mock := newMockCloud(t, scenario{status: 200, body: `{"ok":true}`})
+		defer srv.Close()
+
+		c := NewClient(srv.URL, "startup")
+		c.SetToken("rotated")
+		ctx := WithToken(context.Background(), "startup")
+		if _, err := c.CallServer(ctx, http.MethodPost, "/api/pattern", nil, "tool"); err != nil {
+			t.Fatalf("CallServer: %v", err)
+		}
+		if got := mock.lastAuth("/api/pattern"); got != "Bearer rotated" {
+			t.Errorf("Authorization = %q, want %q", got, "Bearer rotated")
+		}
+	})
+}
+
+func TestCall429HonorsRetryAfter(t *testing.T) {
+	srv, mock := newMockCloud(t,
+		scenario{status: 429, retryAfter: "1"},
+		scenario{status: 200, body: `{"ok": true}`},
+	)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	start := time.Now()
+	out, err := c.Call(context.Background(), http.MethodPost, "/api/events", nil, "tool-a")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"ok"`) {
+		t.Errorf("unexpected body: %s", out)
+	}
+	if mock.count("/api/events") != 2 {
+		t.Errorf("Cloud called %d times, want 2 (one retry)", mock.count("/api/events"))
+	}
+	if elapsed < 900*time.Millisecond {
+		t.Errorf("elapsed %v, expected Retry-After 1s to be honored", elapsed)
+	}
+}
+
+func TestCall429ExponentialBackoff(t *testing.T) {
+	srv, mock := newMockCloud(t,
+		scenario{status: 429},
+		scenario{status: 429},
+		scenario{status: 200, body: `{"ok": true}`},
+	)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	start := time.Now()
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/schedules", nil, "tool-a")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mock.count("/api/schedules") != 3 {
+		t.Errorf("Cloud called %d times, want 3 (two retries)", mock.count("/api/schedules"))
+	}
+	if elapsed < 500*time.Millisecond {
+		t.Errorf("elapsed %v, expected two jittered backoffs", elapsed)
+	}
+}
+
+func TestCall429Exhausted(t *testing.T) {
+	srv, mock := newMockCloud(t,
+		scenario{status: 429},
+		scenario{status: 429},
+		scenario{status: 429},
+		scenario{status: 429},
+	)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/content_items", nil, "tool-a")
+	var limited *ErrRateLimited
+	if !errors.As(err, &limited) {
+		t.Fatalf("expected ErrRateLimited, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "retry after") {
+		t.Errorf("expected 'retry after N seconds' wording: %v", err)
+	}
+	if mock.count("/api/content_items") != 4 {
+		t.Errorf("Cloud called %d times, want 4 (maxRetries 3)", mock.count("/api/content_items"))
+	}
+}
+
+func TestCall429RespectsContext(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 429, retryAfter: "10"})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_, err := c.Call(ctx, http.MethodPost, "/api/events", nil, "tool-a")
+	if mock.count("/api/events") != 1 {
+		t.Errorf("Cloud called %d times, want 1 (bounded retries)", mock.count("/api/events"))
+	}
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err != context.DeadlineExceeded && !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Errorf("expected context error, got %v", err)
+	}
+}
+
+func TestCallTimeoutBoundsRetryAfter(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 503, retryAfter: "86400"})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token", WithTimeout(200*time.Millisecond))
+	start := time.Now()
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/events", nil, "tool-a")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected the retry sleep to be cut short by the configured timeout")
+	}
+	if !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Errorf("expected a deadline error, got %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("elapsed %v, expected the 24h Retry-After to be bounded by the timeout", elapsed)
+	}
+	if mock.count("/api/events") != 1 {
+		t.Errorf("Cloud called %d times, want 1 (no retry after deadline)", mock.count("/api/events"))
+	}
+}
+
+func TestCall503RetriesThenSuccess(t *testing.T) {
+	srv, mock := newMockCloud(t,
+		scenario{status: 503},
+		scenario{status: 200, body: `{"ok": true}`},
+	)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	out, err := c.Call(context.Background(), http.MethodGet, "/api/ledgers", nil, "tool-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"ok"`) {
+		t.Errorf("unexpected body: %s", out)
+	}
+	if mock.count("/api/ledgers") != 2 {
+		t.Errorf("Cloud called %d times, want 2 (one retry)", mock.count("/api/ledgers"))
+	}
+}
+
+func TestCall503ExhaustedNoCredentialChange(t *testing.T) {
+	srv, mock := newMockCloud(t,
+		scenario{status: 503},
+		scenario{status: 503},
+		scenario{status: 503},
+		scenario{status: 503},
+	)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	_, err := c.Call(context.Background(), http.MethodGet, "/api/claims", nil, "tool-a")
+	if !strings.Contains(err.Error(), "service unavailable") {
+		t.Errorf("expected service unavailable wording: %v", err)
+	}
+	if mock.count("/api/claims") != 4 {
+		t.Errorf("Cloud called %d times, want 4 (maxRetries 3)", mock.count("/api/claims"))
+	}
+	// 503 must never clear stored credentials.
+	token, ok := c.Token()
+	if !ok || token != "test-token" {
+		t.Errorf("token was cleared on 503: (%q, %v)", token, ok)
+	}
+}
+
+func TestRevokeOK200EvictsToken(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 200, body: ``})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	if err := c.Revoke(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if mock.count("/revoke") != 1 {
+		t.Errorf("POST /revoke called %d times, want 1", mock.count("/revoke"))
+	}
+	if token, ok := c.Token(); ok {
+		t.Errorf("token not evicted after revoke: %q", token)
+	}
+	// A call after revocation fails with no-token, not with a stale token.
+	if _, err := c.Call(context.Background(), http.MethodGet, "/api/claims", nil, "tool-a"); !strings.Contains(err.Error(), "No API token configured") {
+		t.Errorf("expected no-token error after revoke, got %v", err)
+	}
+}
+
+func TestRevoke503RetriesEvictsAnyway(t *testing.T) {
+	srv, mock := newMockCloud(t,
+		scenario{status: 503},
+		scenario{status: 503},
+		scenario{status: 503},
+		scenario{status: 503},
+	)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	err := c.Revoke(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "503") {
+		t.Errorf("expected revoke 503 error after retries, got %v", err)
+	}
+	if mock.count("/revoke") != 4 {
+		t.Errorf("POST /revoke called %d times, want 4 (maxRetries 3)", mock.count("/revoke"))
+	}
+	// Token dropped regardless of the server response.
+	if token, ok := c.Token(); ok {
+		t.Errorf("token not evicted after revoke failure: %q", token)
+	}
+}
+
+func TestRevoke401IsReauthNoRetry(t *testing.T) {
+	srv, mock := newMockCloud(t, scenario{status: 401})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	err := c.Revoke(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Authentication required") {
+		t.Errorf("expected revoke reauth error, got %v", err)
+	}
+	if mock.count("/revoke") != 1 {
+		t.Errorf("POST /revoke called %d times after 401, want 1 (no retry)", mock.count("/revoke"))
+	}
+	if token, ok := c.Token(); ok {
+		t.Errorf("token not evicted after revoke 401: %q", token)
+	}
+}
 
 func TestTokenFromContext(t *testing.T) {
 	tests := []struct {

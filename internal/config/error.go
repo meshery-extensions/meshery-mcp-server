@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/meshery/meshkit/errors"
 )
@@ -123,4 +124,41 @@ func ErrInvalidLogFormat(format string) error {
 		[]string{fmt.Sprintf("Log format %q is not supported", format)},
 		[]string{"LOG_FORMAT or log.format has a typo"},
 		[]string{"Set LOG_FORMAT to text or json"})
+}
+
+// ErrInvalidMaxConcurrentCalls is returned when the concurrency bound is < 1.
+func ErrInvalidMaxConcurrentCalls(value int) error {
+	return errors.New("meshery-mcp-server-1024", errors.Alert,
+		[]string{"Invalid max concurrent calls"},
+		[]string{fmt.Sprintf("max_concurrent_calls is %d, must be at least 1", value)},
+		[]string{"MESHERY_MAX_CONCURRENT_CALLS / meshery.max_concurrent_calls is too small"},
+		[]string{"Set it to an integer >= 1"})
+}
+
+// ErrInvalidMaxRetries is returned when the retry bound is negative.
+func ErrInvalidMaxRetries(value int) error {
+	return errors.New("meshery-mcp-server-1025", errors.Alert,
+		[]string{"Invalid max retries"},
+		[]string{fmt.Sprintf("max_retries is %d, must not be negative", value)},
+		[]string{"MESHERY_MAX_RETRIES / meshery.max_retries is negative"},
+		[]string{"Set it to an integer >= 0"})
+}
+
+// ErrInvalidTimeout is returned when the request timeout is not positive.
+func ErrInvalidTimeout(value time.Duration) error {
+	return errors.New("meshery-mcp-server-1026", errors.Alert,
+		[]string{"Invalid request timeout"},
+		[]string{fmt.Sprintf("timeout is %v, must be greater than zero", value)},
+		[]string{"MESHERY_TIMEOUT / meshery.timeout is zero or negative"},
+		[]string{"Set it to a positive duration such as 30s or 1m"})
+}
+
+// ErrInvalidAuthMode is returned when the configured Meshery auth mode is
+// neither cookie (Meshery Server) nor bearer (Meshery Cloud).
+func ErrInvalidAuthMode(mode string) error {
+	return errors.New("meshery-mcp-server-1027", errors.Alert,
+		[]string{"Invalid Meshery auth mode"},
+		[]string{fmt.Sprintf("auth mode %q is not supported", mode)},
+		[]string{"MESHERY_AUTH_MODE / meshery.auth_mode has a typo"},
+		[]string{"Set it to cookie for Meshery Server or bearer for Meshery Cloud"})
 }
