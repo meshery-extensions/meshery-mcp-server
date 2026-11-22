@@ -18,6 +18,17 @@ meshery:
   # http://host.docker.internal:9081 to reach Meshery on the host.
   url: http://localhost:9081
 
+  # Narrowest keychain scope the deployment needs (Meshery Cloud only).
+  # Empty (the default) requests no keychain scope: unscoped tokens behave
+  # as before. Env: MESHERY_KEYCHAIN_SCOPE
+  # keychain_scope: org:admin
+
+  # Bound concurrent Cloud calls per tool.              Env: MESHERY_MAX_CONCURRENT_CALLS
+  max_concurrent_calls: 4
+
+  # Bound 429/503 retries per Cloud call.               Env: MESHERY_MAX_RETRIES
+  max_retries: 3
+
 transport:
   # How MCP clients reach the server.     Flag: --transport  Env: MESHERY_MCP_TRANSPORT
   #   stdio  the AI app starts the server and talks over stdin/stdout

@@ -85,11 +85,25 @@ func run(boot logger.Handler) (logger.Handler, error) {
 		stop()
 	}()
 
+	client := meshery.NewClient(
+		cfg.Meshery.URL,
+		string(cfg.Meshery.Token),
+		meshery.WithKeychainScope(cfg.Meshery.KeychainScope),
+		meshery.WithMaxConcurrentCalls(cfg.Meshery.MaxConcurrentCalls),
+		meshery.WithMaxRetries(cfg.Meshery.MaxRetries),
+		meshery.WithLogger(log),
+	)
+	log.Infof("meshery cloud client ready: keychain_scope=%q max_concurrent_calls=%d max_retries=%d",
+		cfg.Meshery.KeychainScope, cfg.Meshery.MaxConcurrentCalls, cfg.Meshery.MaxRetries)
+
+	// TODO: wire the Cloud client into the MCP tools that need it.
+	_ = client
+
 	opts := mcpserver.Options{
 		Name:        appName,
 		Version:     version,
 		Logger:      sdkLog,
-		Registry:    meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL)),
+		Registry:    meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL, string(cfg.Auth.Token))),
 		Credentials: auth.Resolver(cfg.Auth),
 	}
 
