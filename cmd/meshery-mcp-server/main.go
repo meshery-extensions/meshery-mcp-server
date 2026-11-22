@@ -76,6 +76,15 @@ func run(boot logger.Handler) (logger.Handler, error) {
 	log.Infof("starting %s version=%s commit=%s meshery_url=%s token_configured=%t transport=%s",
 		appName, version, commitsha, cfg.Meshery.RedactedURL(), cfg.Auth.Token != "", cfg.Transport.Mode)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		// After the first signal, restore default handling so a second
+		// Ctrl+C exits immediately instead of waiting for shutdown.
+		<-ctx.Done()
+		stop()
+	}()
+
 	client := meshery.NewClient(
 		cfg.Meshery.URL,
 		string(cfg.Meshery.Token),
@@ -87,24 +96,14 @@ func run(boot logger.Handler) (logger.Handler, error) {
 	log.Infof("meshery cloud client ready: keychain_scope=%q max_concurrent_calls=%d max_retries=%d",
 		cfg.Meshery.KeychainScope, cfg.Meshery.MaxConcurrentCalls, cfg.Meshery.MaxRetries)
 
-	// TODO: create MCP server; serve over stdio using `client`.
+	// TODO: wire the Cloud client into the MCP tools that need it.
 	_ = client
-	return nil
-}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go func() {
-		// After the first signal, restore default handling so a second
-		// Ctrl+C exits immediately instead of waiting for shutdown.
-		<-ctx.Done()
-		stop()
-	}()
 
 	opts := mcpserver.Options{
 		Name:        appName,
 		Version:     version,
 		Logger:      sdkLog,
-		Registry:    meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL)),
+		Registry:    meshery.NewRegistry(meshery.NewClient(cfg.Meshery.URL, string(cfg.Auth.Token))),
 		Credentials: auth.Resolver(cfg.Auth),
 	}
 

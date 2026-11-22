@@ -16,32 +16,17 @@ import (
 )
 
 const (
-	keyMesheryURL   = "meshery.url"
-	keyMesheryToken = "meshery.token"
-
-	keyMesheryKeychainScope      = "meshery.keychain_scope"
-	keyMesheryMaxConcurrentCalls = "meshery.max_concurrent_calls"
-	keyMesheryMaxRetries         = "meshery.max_retries"
-	keyLogLevel                  = "log.level"
-
-	envMesheryURL   = "MESHERY_SERVER_URL"
-	envMesheryToken = "MESHERY_API_TOKEN" //nolint:gosec // G101: env var name, not a credential
-
-	envMesheryKeychainScope      = "MESHERY_KEYCHAIN_SCOPE"
-	envMesheryMaxConcurrentCalls = "MESHERY_MAX_CONCURRENT_CALLS"
-	envMesheryMaxRetries         = "MESHERY_MAX_RETRIES"
-	envLogLevel                  = "LOG_LEVEL"
-
-	defaultMesheryURL         = "http://localhost:9081"
-	defaultMaxConcurrentCalls = 4
-	defaultMaxRetries         = 3
-	defaultLogLevel           = LogLevelInfo
 	keyMesheryURL    = "meshery.url"
+	keyMesheryToken  = "meshery.token"
 	keyTransportMode = "transport.mode"
 	keyTransportHost = "transport.host"
 	keyTransportPort = "transport.port"
 	keyLogLevel      = "log.level"
 	keyLogFormat     = "log.format"
+
+	keyMesheryKeychainScope      = "meshery.keychain_scope"
+	keyMesheryMaxConcurrentCalls = "meshery.max_concurrent_calls"
+	keyMesheryMaxRetries         = "meshery.max_retries"
 
 	envMesheryURL    = "MESHERY_SERVER_URL"
 	envMesheryToken  = "MESHERY_API_TOKEN" //nolint:gosec // G101: env var name, not a credential
@@ -52,12 +37,19 @@ const (
 	envLogLevel      = "LOG_LEVEL"
 	envLogFormat     = "LOG_FORMAT"
 
+	envMesheryKeychainScope      = "MESHERY_KEYCHAIN_SCOPE"
+	envMesheryMaxConcurrentCalls = "MESHERY_MAX_CONCURRENT_CALLS"
+	envMesheryMaxRetries         = "MESHERY_MAX_RETRIES"
+
 	defaultMesheryURL    = "http://localhost:9081"
 	defaultTransportMode = TransportStdio
 	defaultTransportHost = "127.0.0.1"
 	defaultTransportPort = 8080
 	defaultLogLevel      = LogLevelInfo
 	defaultLogFormat     = LogFormatText
+
+	defaultMaxConcurrentCalls = 4
+	defaultMaxRetries         = 3
 
 	// MinAccessKeyLength is the shortest HTTP access key accepted: 32
 	// characters, as produced by `openssl rand -hex 16` or longer.
@@ -122,9 +114,6 @@ type MesheryConfig struct {
 
 	// MaxRetries bounds 429/503 retries per Cloud call.
 	MaxRetries int `mapstructure:"max_retries"`
-// MesheryConfig describes where the Meshery server is. It holds no identity.
-type MesheryConfig struct {
-	URL string `mapstructure:"url"`
 }
 
 // RedactedURL returns the URL with any password replaced by "xxxxx", for logs.
@@ -190,13 +179,16 @@ func Load(configPath string, flags Flags) (*Config, error) {
 		if err := v.ReadInConfig(); err != nil {
 			return nil, ErrReadConfigFile(err, configPath)
 		}
+		// InConfig reports only keys that came from the file. IsSet is not
+		// usable here: meshery.token has a default and an env binding, so it
+		// is always "set" even when the file is clean.
 		for _, key := range fileTokenKeys {
-			if v.IsSet(key) {
+			if v.InConfig(key) {
 				return nil, ErrTokenInConfigFile(key)
 			}
 		}
 		for _, key := range fileAccessKeyKeys {
-			if v.IsSet(key) {
+			if v.InConfig(key) {
 				return nil, ErrAccessKeyInConfigFile(key)
 			}
 		}
@@ -293,15 +285,17 @@ func (c *Config) validate() error {
 		return ErrInvalidLogLevel(c.Log.Level)
 	}
 
+	switch c.Log.Format {
+	case LogFormatText, LogFormatJSON:
+	default:
+		return ErrInvalidLogFormat(c.Log.Format)
+	}
+
 	if c.Meshery.MaxConcurrentCalls < 1 {
 		return ErrInvalidMaxConcurrentCalls(c.Meshery.MaxConcurrentCalls)
 	}
 	if c.Meshery.MaxRetries < 0 {
 		return ErrInvalidMaxRetries(c.Meshery.MaxRetries)
-	switch c.Log.Format {
-	case LogFormatText, LogFormatJSON:
-	default:
-		return ErrInvalidLogFormat(c.Log.Format)
 	}
 	return nil
 }

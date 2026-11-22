@@ -4,18 +4,13 @@ meshery-mcp-server reads its configuration once, at startup. To change a setting
 
 ## Settings
 
-| Setting | Environment variable | Config file key | Default | Accepted values |
-|---|---|---|---|---|
-| Meshery server URL | `MESHERY_SERVER_URL` | `meshery.url` | `http://localhost:9081` | An `http://` or `https://` URL with a host |
-| Meshery provider token | `MESHERY_API_TOKEN` | `meshery.token` | *(none)* | Any string; optional |
-| Keychain scope | `MESHERY_KEYCHAIN_SCOPE` | `meshery.keychain_scope` | *(none)* | Comma-separated keychain ids/names; empty = unscoped token (previous behavior) |
-| Max concurrent Cloud calls per tool | `MESHERY_MAX_CONCURRENT_CALLS` | `meshery.max_concurrent_calls` | `4` | Integer >= 1 |
-| Max Cloud retries per call | `MESHERY_MAX_RETRIES` | `meshery.max_retries` | `3` | Integer >= 0 |
-| Log level | `LOG_LEVEL` | `log.level` | `info` | `debug`, `info`, `warn`, `error` (case-insensitive) |
 | Setting | Flag | Environment variable | Config file key | Default | Accepted values |
 |---|---|---|---|---|---|
 | Meshery server URL | | `MESHERY_SERVER_URL` | `meshery.url` | `http://localhost:9081` | An `http://` or `https://` URL with a host |
-| Meshery provider token | | `MESHERY_API_TOKEN` | *(not allowed)* | *(none)* | Any string |
+| Meshery provider token | | `MESHERY_API_TOKEN` | *(not allowed)* | *(none)* | Any string; optional |
+| Keychain scope | | `MESHERY_KEYCHAIN_SCOPE` | `meshery.keychain_scope` | *(none)* | Comma-separated keychain ids/names; empty = unscoped token (previous behavior) |
+| Max concurrent Cloud calls per tool | | `MESHERY_MAX_CONCURRENT_CALLS` | `meshery.max_concurrent_calls` | `4` | Integer >= 1 |
+| Max Cloud retries per call | | `MESHERY_MAX_RETRIES` | `meshery.max_retries` | `3` | Integer >= 0 |
 | Transport | `--transport` | `MESHERY_MCP_TRANSPORT` | `transport.mode` | `stdio` | `stdio`, `http` (case-insensitive) |
 | HTTP host | `--host` | `MESHERY_MCP_HOST` | `transport.host` | `127.0.0.1` | A loopback address: `127.0.0.1`, `::1`, `localhost` |
 | HTTP port | `--port` | `MESHERY_MCP_PORT` | `transport.port` | `8080` | `1`–`65535` |
@@ -95,6 +90,8 @@ The token is a credential. The server never prints it: it is redacted as `[REDAC
 - **With Docker**, pass it as `-e MESHERY_API_TOKEN` with no `=value`. Docker then copies the value from its own environment, so the token never appears in the command line or in process listings.
 - **Never bake it into an image** with `ENV` or `--build-arg`. Build arguments are recorded in the image and readable with `docker history`.
 
+The same applies to `MESHERY_MCP_ACCESS_KEY`: environment only, never in the config file or on the command line.
+
 ## Cloud API-token behavior
 
 When `MESHERY_SERVER_URL` points at Meshery Cloud, the client behaves as follows:
@@ -141,7 +138,6 @@ on revoke.
 | 403 | Insufficient keychain scope | Grant the missing scope named in the error, or set `MESHERY_KEYCHAIN_SCOPE` to the narrowest scope the deployment needs; do not re-auth |
 | 429 | Rate limited | Wait for `Retry-After` (or the backoff) and retry; reduce `meshery.max_concurrent_calls` if batches keep hitting it |
 | 503 | Cloud service unavailable | Retry later; no credential changes are made |
-The same applies to `MESHERY_MCP_ACCESS_KEY`: environment only, never in the config file or on the command line.
 
 ## Usage
 

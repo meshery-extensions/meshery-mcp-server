@@ -281,16 +281,6 @@ func (c *Client) Revoke(ctx context.Context) error {
 func classRetryAfter(resp *http.Response) time.Duration {
 	delay, _ := parseRetryAfter(resp.Header.Get("Retry-After"))
 	return delay
-import "context"
-
-// Client knows where Meshery is. It holds no identity: the caller's token
-// travels with each request's context (see WithToken).
-type Client struct {
-	baseURL string
-}
-
-func NewClient(baseURL string) *Client {
-	return &Client{baseURL: baseURL}
 }
 
 type tokenKey struct{}

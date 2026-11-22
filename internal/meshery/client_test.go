@@ -3,6 +3,7 @@ package meshery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -343,10 +344,8 @@ func TestRevoke401IsReauthNoRetry(t *testing.T) {
 	}
 	if token, ok := c.Token(); ok {
 		t.Errorf("token not evicted after revoke 401: %q", token)
-	"fmt"
-	"strings"
-	"testing"
-)
+	}
+}
 
 func TestTokenFromContext(t *testing.T) {
 	tests := []struct {
